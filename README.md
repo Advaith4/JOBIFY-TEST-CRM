@@ -88,8 +88,9 @@ Create a `.env` file in the root directory:
 GROQ_API_KEY=your_groq_api_key
 RAPIDAPI_KEY=your_rapidapi_key
 HF_TOKEN=your_huggingface_token
-OPENAI_MODEL=meta-llama/Llama-3.1-8B-Instruct
-OPENAI_BASE_URL=https://router.huggingface.co/v1
+MODEL_NAME=meta-llama/Llama-3.1-8B-Instruct
+API_BASE_URL=https://router.huggingface.co/v1
+LOCAL_IMAGE_NAME=optional_local_image_name
 ```
 
 ### 5. Run the Main App
@@ -118,6 +119,7 @@ The environment implements:
 - `reset()` to start a task
 - `step(action)` to advance the trajectory
 - `state()` to inspect current environment state
+- baseline inference config via `HF_TOKEN`, `API_BASE_URL`, and `MODEL_NAME`
 
 ## Observation Space
 Each observation contains:
@@ -201,6 +203,7 @@ python -m openenv.inference
 It uses:
 - OpenAI client
 - `HF_TOKEN` from environment variables
+- `API_BASE_URL` and `MODEL_NAME` with safe defaults
 - deterministic task ordering
 - `temperature=0` for reproducibility
 

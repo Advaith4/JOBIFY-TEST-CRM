@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 
 from dotenv import load_dotenv
-from openai import OpenAI
+from openai import APIConnectionError, AuthenticationError, OpenAI
 
 from openenv.env import Action, JobifyEnv
 
@@ -24,8 +24,17 @@ def _build_client() -> OpenAI:
         raise RuntimeError("HF_TOKEN is not set in the environment or .env file.")
     return OpenAI(
         api_key=api_key,
-        base_url=os.getenv("OPENAI_BASE_URL", "https://router.huggingface.co/v1"),
+        base_url=os.getenv("API_BASE_URL", "https://router.huggingface.co/v1"),
     )
+
+
+def _print_env_help() -> None:
+    print("Required environment variables:")
+    print("  HF_TOKEN=<your_huggingface_token>")
+    print("Optional environment variables:")
+    print("  API_BASE_URL=https://router.huggingface.co/v1")
+    print("  MODEL_NAME=meta-llama/Llama-3.1-8B-Instruct")
+    print("  LOCAL_IMAGE_NAME=<optional local docker image name>")
 
 
 def run_inference() -> float:
@@ -33,7 +42,7 @@ def run_inference() -> float:
     env = JobifyEnv(seed=7, max_attempts=2)
     total_reward = 0.0
     task_ids = ["skill_extraction", "job_matching", "resume_optimization"]
-    model_name = os.getenv("OPENAI_MODEL", "meta-llama/Llama-3.1-8B-Instruct")
+    model_name = os.getenv("MODEL_NAME", "meta-llama/Llama-3.1-8B-Instruct")
 
     for task_id in task_ids:
         observation = env.load_task(task_id)
@@ -70,4 +79,20 @@ def run_inference() -> float:
 
 
 if __name__ == "__main__":
-    run_inference()
+    try:
+        run_inference()
+    except RuntimeError as exc:
+        print(f"Configuration error: {exc}")
+        _print_env_help()
+        raise SystemExit(1)
+    except AuthenticationError:
+        print("Authentication error: HF_TOKEN was rejected by the provider.")
+        print("Check that your Hugging Face token is valid and has inference access.")
+        _print_env_help()
+        raise SystemExit(1)
+    except APIConnectionError:
+        print("Connection error: unable to reach the configured inference provider.")
+        print("Check your internet connection, firewall, proxy, or the API_BASE_URL value.")
+        print(f"Current API_BASE_URL: {os.getenv('API_BASE_URL', 'https://router.huggingface.co/v1')}")
+        _print_env_help()
+        raise SystemExit(1)
