@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jobify.ai | AI Career Assistant</title>
+    <meta name="description" content="Upload your resume and get real job matches, resume tips, and interview prep — powered by AI.">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <div class="noise"></div>
+
+    <!-- ── LANDING PAGE ── -->
+    <div id="page-home" class="page active">
+        <div class="home-inner">
+            <div class="logo-mark">
+                <i class="fa-solid fa-bolt"></i>
+            </div>
+            <div class="app-name">Jobify<span class="grad">.ai</span></div>
+            <h1 class="home-headline">Your career,<br><span class="grad">powered by AI.</span></h1>
+            <p class="home-sub">Upload your resume and get real job matches, ATS resume fixes, and tailored interview prep — in under 60 seconds.</p>
+
+            <div class="pill-row">
+                <span class="pill"><i class="fa-solid fa-globe"></i> Live job search</span>
+                <span class="pill"><i class="fa-solid fa-chart-bar"></i> Skill match score</span>
+                <span class="pill"><i class="fa-solid fa-microphone-lines"></i> Interview coach</span>
+            </div>
+
+            <div class="upload-card" id="drop-zone">
+                <input type="file" id="file-input" accept="application/pdf" hidden>
+                <div class="upload-icon"><i class="fa-regular fa-file-pdf"></i></div>
+                <p class="upload-label">Drop your PDF resume here</p>
+                <p class="upload-hint">or</p>
+                <button class="btn-outline" onclick="document.getElementById('file-input').click()">Browse files</button>
+                <div id="file-info" class="file-chip hidden">
+                    <i class="fa-solid fa-circle-check"></i>
+                    <span id="file-name"></span>
+                </div>
+            </div>
+
+            <button class="btn-primary" id="analyze-btn" disabled>
+                <i class="fa-solid fa-wand-magic-sparkles"></i>
+                Analyze Resume
+            </button>
+
+            <p class="footer-note">Built with <strong>CrewAI · Groq · JSearch API</strong></p>
+        </div>
+    </div>
+
+    <!-- ── PREFERENCES PAGE ── -->
+    <div id="page-prefs" class="page hidden" style="display:flex; align-items:center; justify-content:center; min-height:100vh; padding:3rem 1.25rem;">
+        <div class="home-inner" style="max-width: 500px;">
+            <div class="logo-mark" style="margin-bottom:0;"><i class="fa-solid fa-sliders"></i></div>
+            <h2 class="home-headline" style="font-size: 2rem;">Tailor your matches</h2>
+            <p class="home-sub">Tell us a bit about what you're looking for so we can find the perfect roles for you.</p>
+
+            <form id="prefs-form" class="prefs-form">
+                <div class="form-group">
+                    <label>Location</label>
+                    <input type="text" id="pref-location" placeholder="e.g., India, Bangalore, New York" value="India">
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Experience</label>
+                        <select id="pref-exp">
+                            <option value="Fresher">Fresher (0 years)</option>
+                            <option value="Entry-level">Entry-level (1-3 years)</option>
+                            <option value="Mid-level">Mid-level (3-5 years)</option>
+                            <option value="Senior">Senior (5+ years)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Work Mode</label>
+                        <select id="pref-mode">
+                            <option value="Any">Any Mode</option>
+                            <option value="Remote">Remote</option>
+                            <option value="Hybrid">Hybrid</option>
+                            <option value="On-site">On-site</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Job Type</label>
+                        <select id="pref-type">
+                            <option value="Full-time">Full-time</option>
+                            <option value="Internship">Internship</option>
+                            <option value="Contract">Contract</option>
+                        </select>
+                    </div>
+                </div>
+
+                <button type="submit" class="btn-primary" style="margin-top: .5rem;">
+                    <i class="fa-solid fa-magnifying-glass-arrow-right"></i>
+                    Find My Matches
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- ── LOADING PAGE ── -->
+    <div id="page-loading" class="page hidden">
+        <div class="loading-inner">
+            <div class="spinner-wrap">
+                <div class="spin-ring spin-a"></div>
+                <div class="spin-ring spin-b"></div>
+            </div>
+            <h2 class="loading-title">Analyzing your resume…</h2>
+
+            <div class="steps">
+                <div class="step" id="step-1">
+                    <div class="step-dot"></div>
+                    <div class="step-body">
+                        <span class="step-name">Role Inference</span>
+                        <span class="step-desc">AI reads your resume and finds the best fitting roles</span>
+                    </div>
+                </div>
+                <div class="step" id="step-2">
+                    <div class="step-dot"></div>
+                    <div class="step-body">
+                        <span class="step-name">Live Job Search</span>
+                        <span class="step-desc">JSearch API fetches real, verified job postings</span>
+                    </div>
+                </div>
+                <div class="step" id="step-3">
+                    <div class="step-dot"></div>
+                    <div class="step-body">
+                        <span class="step-name">Scoring & Formatting</span>
+                        <span class="step-desc">Skills matched, scores calculated, results structured</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── RESULTS PAGE ── -->
+    <div id="page-results" class="page hidden">
+        <div class="results-header">
+            <div class="results-logo">
+                <i class="fa-solid fa-bolt"></i> Jobify<span class="grad">.ai</span>
+            </div>
+            <button class="btn-ghost" id="reset-btn">
+                <i class="fa-solid fa-rotate-left"></i> New analysis
+            </button>
+        </div>
+
+        <!-- Summary strip -->
+        <div class="summary-strip" id="summary-strip">
+            <div class="summary-score">
+                <svg class="ring-svg" viewBox="0 0 40 40">
+                    <circle class="ring-track" cx="20" cy="20" r="16"/>
+                    <circle class="ring-prog" id="sum-ring" cx="20" cy="20" r="16"/>
+                </svg>
+                <span class="ring-val" id="sum-pct">0%</span>
+            </div>
+            <div class="summary-text">
+                <span class="summary-label">Avg match score</span>
+                <span class="summary-verdict" id="summary-verdict">—</span>
+            </div>
+            <div class="summary-badges">
+                <span class="sbadge" id="s-roles"></span>
+                <span class="sbadge" id="s-jobs"></span>
+            </div>
+        </div>
+
+        <!-- Tabs -->
+        <div class="tabs" id="tabs">
+            <button class="tab active" data-pane="pane-jobs">
+                <i class="fa-solid fa-briefcase"></i> Job Matches
+            </button>
+            <button class="tab" data-pane="pane-resume">
+                <i class="fa-solid fa-file-signature"></i> Resume Tips
+            </button>
+            <button class="tab" data-pane="pane-interview">
+                <i class="fa-solid fa-comments"></i> Interview Prep
+            </button>
+        </div>
+
+        <!-- Panes -->
+        <div id="pane-jobs" class="pane active">
+            <div class="roles-block" id="roles-container"></div>
+            <div class="cards-list" id="jobs-container"></div>
+        </div>
+
+        <div id="pane-resume" class="pane hidden">
+            <ul class="tips-list" id="improvements-list"></ul>
+        </div>
+
+        <div id="pane-interview" class="pane hidden">
+            <!-- ── Interactive Interview ── -->
+            <div class="interactive-interview-block" id="interactive-interview-block">
+                <button class="btn-primary" id="start-interactive-btn" style="margin-bottom: 1.5rem; width:100%; border-radius: 12px; font-size: 1.05rem;">
+                    <i class="fa-solid fa-play"></i> Start Interactive Mock Interview
+                </button>
+                <div id="interview-chat" class="hidden" style="background: var(--surface); padding: 1.25rem; border-radius: 16px; border: 1px solid var(--border); margin-bottom:2rem;">
+                    <h3 style="margin-bottom:1rem; font-size:1.1rem; border-bottom:1px solid var(--border); padding-bottom:.5rem;">Mock Interview Session</h3>
+                    <div id="interview-chat-log" style="display:flex; flex-direction:column; gap:.85rem; max-height:400px; overflow-y:auto; margin-bottom:1rem; padding-right:.5rem;"></div>
+                    <form id="interview-answer-form" style="display:flex; gap:.5rem;">
+                        <input type="text" id="interview-answer-input" required placeholder="Type your answer here..." style="flex:1; padding:.85rem 1rem; border-radius:12px; border:1px solid var(--border); background:var(--bg); color:var(--text); font-family:'Inter', sans-serif;">
+                        <button type="submit" class="btn-primary" id="interview-submit-btn" style="width:auto; padding:0 1.5rem;"><i class="fa-solid fa-paper-plane"></i></button>
+                    </form>
+                </div>
+            </div>
+
+            <hr style="border:0; border-top:1px solid var(--border); margin: 2rem 0;">
+            <h3 style="margin-bottom: 1.25rem; font-size:1.1rem; color: var(--text);">Or review generated static questions:</h3>
+
+            <div class="cards-list" id="questions-container"></div>
+        </div>
+    </div>
+
+    <script src="script.js?v=2"></script>
+</body>
+</html>

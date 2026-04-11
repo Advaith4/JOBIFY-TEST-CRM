@@ -1,0 +1,17 @@
+name: jobify-env
+description: AI hiring and resume evaluation environment
+version: "1.0.0"
+tags:
+  - openenv
+  - hiring
+  - evaluation
+  - huggingface-space
+tasks:
+  - skill_extraction
+  - job_matching
+  - resume_optimization
+observation_space: text
+action_space: text
+reward_range: [0, 1]
+entrypoint: openenv.env:JobifyEnv
+baseline_script: openenv/inference.py
