@@ -43,6 +43,7 @@ def run_inference() -> float:
     total_reward = 0.0
     task_ids = ["skill_extraction", "job_matching", "resume_optimization"]
     model_name = os.getenv("MODEL_NAME", "meta-llama/Llama-3.1-8B-Instruct")
+    print(f"START model={model_name} tasks={len(task_ids)}")
 
     for task_id in task_ids:
         observation = env.load_task(task_id)
@@ -65,16 +66,19 @@ def run_inference() -> float:
             attempt_rewards.append(reward.score)
             final_reward = reward.score
 
+            print(
+                f"STEP task={task_id} attempt={info['attempt_count']} "
+                f"reward={reward.score:.4f} done={done}"
+            )
+
         total_reward += final_reward
-        print(f"Task: {task_id}")
-        print(response_text.strip())
-        print(f"Attempt Rewards: {[round(score, 4) for score in attempt_rewards]}")
-        print(f"Final Reward: {final_reward:.4f}")
-        print(f"Info: {info}")
-        print("-" * 60)
+        print(
+            f"STEP task={task_id} final_reward={final_reward:.4f} "
+            f"attempt_rewards={[round(score, 4) for score in attempt_rewards]}"
+        )
 
     final_score = total_reward / len(task_ids)
-    print(f"Baseline Score: {final_score:.4f}")
+    print(f"END baseline_score={final_score:.4f}")
     return final_score
 
 
