@@ -3,185 +3,224 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Jobify.ai | Your AI Career CRM</title>
-    <meta name="description" content="AI Career CRM: land the right job with AI-tailored resumes, daily job discovery, and mock interview prep.">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <title>Jobify.ai | Next-Gen Career CRM</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="style.css?v=5">
+    <link rel="stylesheet" href="style.css?v=20260417">
 </head>
 <body>
     <div class="noise"></div>
+    <div class="glow-orb orb-primary"></div>
+    <div class="glow-orb orb-secondary"></div>
 
-    <!-- ── Ambient Background Orbs ── -->
-    <div class="orb orb-1"></div>
-    <div class="orb orb-2"></div>
-
-    <!-- ═══════════════════════════════
-         PAGE: LOGIN
-    ═══════════════════════════════ -->
-    <div id="page-login" class="page active">
-        <div class="login-container">
-            <div class="login-card">
-                <!-- Logo -->
-                <div class="login-logo">
-                    <div class="logo-mark"><i class="fa-solid fa-bolt"></i></div>
-                    <span class="app-name">Jobify<span class="grad">.ai</span></span>
+    <!-- LOGIN PAGE -->
+    <main id="page-login" class="page active modern-login-page">
+        <section class="split-login-container">
+            <!-- LEFT PANEL -->
+            <div class="login-panel">
+                <div class="login-panel-inner">
+                    <div class="login-brand">
+                        <i class="fa-solid fa-bolt gradient-text"></i> Jobify<span class="gradient-text">.ai</span>
+                    </div>
+                    
+                    <div class="login-headings">
+                        <h1 class="welcome-text">Welcome back.</h1>
+                        <p class="subtitle">Your AI-powered career accelerator.</p>
+                    </div>
+                    
+                    <form id="modern-login-form" class="modern-form">
+                        <div class="modern-input-group">
+                            <label for="login-username">Username</label>
+                            <div class="input-wrapper">
+                                <i class="fa-regular fa-user input-icon"></i>
+                                <input type="text" id="login-username" placeholder="jobify_user" required autocomplete="username">
+                                <i class="fa-solid fa-circle-check auth-check hidden"></i>
+                            </div>
+                            <span class="error-text" id="email-error"></span>
+                        </div>
+                        
+                        <div class="modern-input-group">
+                            <div class="label-row">
+                                <label for="login-password">Password</label>
+                                <a href="#" class="forgot-pwd">Forgot password?</a>
+                            </div>
+                            <div class="input-wrapper">
+                                <i class="fa-solid fa-lock input-icon"></i>
+                                <input type="password" id="login-password" placeholder="••••••••" required>
+                                <button type="button" class="pwd-toggle" id="pwd-toggle"><i class="fa-regular fa-eye"></i></button>
+                            </div>
+                            <div class="pwd-strength" id="pwd-strength">
+                                <div class="strength-bar"><div class="strength-fill"></div></div>
+                                <span class="strength-text"></span>
+                            </div>
+                            <span class="error-text" id="pwd-error"></span>
+                        </div>
+                        
+                        <button type="submit" class="btn-modern-primary" id="login-btn">
+                            <span>Sign In</span> <i class="fa-solid fa-arrow-right"></i>
+                        </button>
+                        
+                        <div class="auth-divider">
+                            <span>or continue with</span>
+                        </div>
+                        
+                        <button type="button" class="btn-social-outline">
+                            <img src="https://upload.wikimedia.org/wikipedia/commons/5/53/Google_%22G%22_Logo.svg" alt="Google">
+                            <span>Sign in with Google</span>
+                        </button>
+                    </form>
+                    
+                    <p class="signup-prompt">
+                        Don't have an account? <a href="#">Create one</a>
+                    </p>
                 </div>
-
-                <h1 class="login-headline">Your AI Career CRM</h1>
-                <p class="login-sub">Enter your username to access your personalized job feed, saved resume, and application tracker — all powered by AI.</p>
-
-                <div class="login-feature-pills">
-                    <span class="pill"><i class="fa-solid fa-database"></i> Supabase DB</span>
-                    <span class="pill"><i class="fa-solid fa-robot"></i> CrewAI Agents</span>
-                    <span class="pill"><i class="fa-solid fa-briefcase"></i> Job Tracker</span>
-                </div>
-
-                <div class="login-form-group">
-                    <label class="login-label" for="login-username">
-                        <i class="fa-solid fa-user"></i> Username
-                    </label>
-                    <input
-                        type="text"
-                        id="login-username"
-                        class="login-input"
-                        placeholder="e.g. advaith123"
-                        autocomplete="off"
-                        spellcheck="false"
-                    />
-                </div>
-
-                <button class="btn-primary" id="login-btn">
-                    <i class="fa-solid fa-arrow-right-to-bracket"></i>
-                    Continue to Dashboard
-                </button>
-
-                <p class="login-footer-note">New users are created automatically. No password needed.</p>
             </div>
-        </div>
-    </div>
-
-    <!-- ═══════════════════════════════
-         PAGE: UPLOAD RESUME
-    ═══════════════════════════════ -->
-    <div id="page-home" class="page hidden">
-        <div class="center-page">
-            <div class="home-inner">
-                <div class="logo-mark"><i class="fa-solid fa-cloud-arrow-up"></i></div>
-                <div class="app-name">Jobify<span class="grad">.ai</span></div>
-                <h1 class="home-headline">Store your resume,<br><span class="grad">forever.</span></h1>
-                <p class="home-sub">Upload once and we'll save it securely to Supabase. We'll use it to find jobs for you every day — no re-uploading, ever.</p>
-
-                <div class="upload-card" id="drop-zone">
+            
+            <!-- RIGHT VISUAL PANEL -->
+            <div class="visual-panel">
+                <div class="visual-bg-decor1"></div>
+                <div class="visual-bg-decor2"></div>
+                
+                <div class="visual-content">
+                    <div class="visual-badge">
+                        <div class="live-pulse"></div>
+                        <span class="animated-stat" id="resumes-analyzed">24,103 resumes analyzed today</span>
+                    </div>
+                    
+                    <h2 class="visual-title">Supercharge your career trajectory.</h2>
+                    <p class="visual-subtitle">Our autonomous agents scan thousands of roles, matching your unique skills to the perfect opportunities in real-time.</p>
+                    
+                    <!-- Premium Glass Morphic Mock Dashboard -->
+                    <div class="mock-dash glass-card">
+                        <div class="mock-header">
+                            <div class="mock-dots">
+                                <span class="mdot r"></span><span class="mdot y"></span><span class="mdot g"></span>
+                            </div>
+                            <span class="mock-title">AI Engine Activity</span>
+                        </div>
+                        <div class="mock-body">
+                            <div class="mock-item anim-1">
+                                <div class="mi-icon blue-glow"><i class="fa-solid fa-wand-magic-sparkles"></i></div>
+                                <div class="mi-text">
+                                    <h4>Senior Frontend Engineer</h4>
+                                    <span class="gradient-text deep-match">Deep Match: 98%</span>
+                                </div>
+                            </div>
+                            <div class="mock-item anim-2 mt-3">
+                                <div class="mi-icon purple-glow"><i class="fa-solid fa-file-pdf"></i></div>
+                                <div class="mi-text">
+                                    <h4>Tailoring resume bullets...</h4>
+                                    <div class="loading-bar"><div class="loading-fill pulse-anim"></div></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+    <!-- UPLOAD RESUME PAGE -->
+    <main id="page-home" class="page hidden">
+        <section class="upload-wrapper">
+            <div class="content-center">
+                <h1 class="headline-large">Store your resume,<br><span class="gradient-text">permanently.</span></h1>
+                <p class="subtitle mt-3">We securely extract your profile into our Supabase vector engine. Our AI reads it to hunt for jobs daily.</p>
+                
+                <div class="upload-dropzone glass-card mt-5" id="drop-zone" onclick="document.getElementById('file-input').click()">
                     <input type="file" id="file-input" accept="application/pdf" hidden>
-                    <div class="upload-icon"><i class="fa-regular fa-file-pdf"></i></div>
-                    <p class="upload-label">Drop your PDF resume here</p>
-                    <p class="upload-hint">or</p>
-                    <button class="btn-outline" id="browse-btn" onclick="document.getElementById('file-input').click()">Browse files</button>
+                    <div class="icon-blob"><i class="fa-regular fa-file-pdf"></i></div>
+                    <h3>Drag & Drop your precise PDF</h3>
+                    <p>or click to browse local files</p>
                     <div id="file-info" class="file-chip hidden">
-                        <i class="fa-solid fa-circle-check"></i>
-                        <span id="file-name"></span>
+                        <i class="fa-solid fa-circle-check"></i> <span id="file-name"></span>
                     </div>
                 </div>
-
-                <button class="btn-primary" id="upload-db-btn" disabled>
-                    <i class="fa-solid fa-cloud-arrow-up"></i>
-                    Save to CRM Database
-                </button>
-                <p class="footer-note">Logged in as <strong id="upload-username-display">—</strong></p>
-            </div>
-        </div>
-    </div>
-
-    <!-- ═══════════════════════════════
-         PAGE: LOADING
-    ═══════════════════════════════ -->
-    <div id="page-loading" class="page hidden">
-        <div class="loading-inner">
-            <div class="spinner-wrap">
-                <div class="spin-ring spin-a"></div>
-                <div class="spin-ring spin-b"></div>
-            </div>
-            <h2 class="loading-title" id="loading-text">Working...</h2>
-            <p class="loading-sub" id="loading-sub-text">Connecting to Supabase and AI agents...</p>
-        </div>
-    </div>
-
-    <!-- ═══════════════════════════════
-         PAGE: DASHBOARD / RESULTS
-    ═══════════════════════════════ -->
-    <div id="page-results" class="page hidden">
-        <!-- Top Nav Bar -->
-        <div class="dashboard-nav">
-            <div class="results-logo">
-                <i class="fa-solid fa-bolt"></i> Jobify<span class="grad">.ai</span>
-            </div>
-            <div class="dashboard-user-badge">
-                <i class="fa-solid fa-circle-user"></i>
-                <span id="display-user">User</span>
-                <span class="db-live-badge"><i class="fa-solid fa-circle" style="font-size:6px; color:#34d399;"></i> DB Live</span>
-            </div>
-        </div>
-
-        <!-- Tabs -->
-        <div class="tabs-wrapper">
-            <div class="tabs" id="tabs">
-                <button class="tab active" data-pane="pane-jobs">
-                    <i class="fa-solid fa-fire"></i> Daily Feed
-                </button>
-                <button class="tab" data-pane="pane-tracker">
-                    <i class="fa-solid fa-list-check"></i> Applications
-                </button>
-                <button class="tab" data-pane="pane-interview">
-                    <i class="fa-solid fa-comments"></i> Interview Prep
+                
+                <button class="btn btn-primary mt-4 w-full" id="upload-db-btn" disabled>
+                    <i class="fa-solid fa-cloud-arrow-up"></i> Ingest into Jobify Core
                 </button>
             </div>
-        </div>
+        </section>
+    </main>
 
-        <div class="dashboard-content">
-            <!-- PANE: Daily Job Feed -->
-            <div id="pane-jobs" class="pane active">
-                <div class="pane-header">
-                    <h2 class="pane-title"><i class="fa-solid fa-fire" style="color:var(--amber);"></i> Today's Job Feed</h2>
-                    <p class="pane-desc">Matched to your saved resume via AI. Click "Track & Auto-Tailor" to save and get a tailored resume draft.</p>
+    <!-- LOADING PAGE -->
+    <main id="page-loading" class="page hidden">
+        <div class="loader-wrapper">
+            <div class="modern-spinner"></div>
+            <h2 id="loading-text" class="gradient-text loader-text">Processing...</h2>
+            <p class="loader-sub">Orchestrating AI pipeline operations</p>
+        </div>
+    </main>
+
+    <!-- DASHBOARD PAGE -->
+    <main id="page-results" class="page hidden dashboard-layout">
+        <nav class="top-nav glass-panel">
+            <div class="brand">
+                <div class="brand-icon small"><i class="fa-solid fa-bolt"></i></div>
+                <span class="brand-text">Jobify<span class="gradient-text">.ai</span></span>
+            </div>
+            
+            <div class="nav-links">
+                <button class="tab active" data-pane="pane-jobs"><i class="fa-solid fa-layer-group"></i> Feed</button>
+                <button class="tab" data-pane="pane-tracker"><i class="fa-solid fa-list-check"></i> Tracker</button>
+                <button class="tab" data-pane="pane-interview"><i class="fa-solid fa-microphone-lines"></i> Mock Interview</button>
+            </div>
+            
+            <div class="user-badge glass-card inline">
+                <i class="fa-solid fa-circle-user gradient-text"></i> <span id="display-user">User</span>
+                <div class="live-dot pulse"></div>
+            </div>
+        </nav>
+
+        <section class="dashboard-viewport">
+            <div id="pane-jobs" class="pane active fade-in">
+                <div class="pane-hero">
+                    <h2>Your Tailored Intel</h2>
+                    <p>Our agents have successfully cross-referenced your raw skills against today's live job market.</p>
                 </div>
-                <div class="cards-list" id="jobs-container"></div>
+                <div id="jobs-container" class="grid-card-layout"></div>
             </div>
 
-            <!-- PANE: Application Tracker -->
-            <div id="pane-tracker" class="pane hidden">
-                <div class="pane-header">
-                    <h2 class="pane-title"><i class="fa-solid fa-list-check" style="color:var(--violet);"></i> Application Tracker</h2>
-                    <p class="pane-desc">All your tracked applications. Your AI-tailored resume bullets are right inside each card — ready to copy-paste.</p>
+            <div id="pane-tracker" class="pane hidden fade-in">
+                <div class="pane-hero">
+                    <h2>Application Intelligence</h2>
+                    <p>Access your dynamically modified ATS-friendly resume bullets here when you are ready to apply.</p>
                 </div>
-                <div id="tracker-container"></div>
+                <div id="tracker-container" class="stack-layout"></div>
             </div>
 
-            <!-- PANE: Interview Prep -->
-            <div id="pane-interview" class="pane hidden">
-                <div class="pane-header">
-                    <h2 class="pane-title"><i class="fa-solid fa-comments" style="color:var(--cyan);"></i> Mock Interview Coach</h2>
-                    <p class="pane-desc">Practice with an AI coach that adapts difficulty based on your answers.</p>
+            <div id="pane-interview" class="pane hidden fade-in">
+                <div class="pane-hero">
+                    <h2>Mock Interview Studio</h2>
+                    <p>Dynamic AI feedback driven by CrewAI reasoning models.</p>
                 </div>
-                <div class="interactive-interview-block" id="interactive-interview-block">
-                    <button class="btn-primary" id="start-interactive-btn" style="width:100%; border-radius: 12px;">
-                        <i class="fa-solid fa-play"></i> Start Mock Interview
-                    </button>
-                    <div id="interview-chat" class="interview-chat-box hidden">
-                        <h3 class="interview-chat-title"><i class="fa-solid fa-microphone"></i> Live Interview Session</h3>
-                        <div id="interview-chat-log" class="chat-log"></div>
-                        <form id="interview-answer-form" class="chat-input-row">
-                            <input type="text" id="interview-answer-input" required placeholder="Type your answer here..." class="chat-input">
-                            <button type="submit" class="btn-primary" id="interview-submit-btn" style="width:auto; padding:0 1.25rem; border-radius:10px;">
-                                <i class="fa-solid fa-paper-plane"></i>
-                            </button>
-                        </form>
+                <div class="studio-container mt-4">
+                    <div id="studio-setup" class="glass-card padding-xl">
+                        <h3>Start a New Interview</h3>
+                        <div class="modern-input-group mt-3">
+                            <label>Target Role</label>
+                            <input type="text" id="interview-role" placeholder="e.g. Senior Frontend Engineer">
+                        </div>
+                        <div class="modern-input-group mt-3">
+                            <label>Difficulty (1-10)</label>
+                            <input type="number" id="interview-diff" placeholder="5" min="1" max="10">
+                        </div>
+                        <button id="start-interview-btn" class="btn-modern-primary mt-4 w-full">Start AI Interview</button>
+                    </div>
+                    <div id="studio-active" class="glass-card padding-xl hidden">
+                        <div class="chat-area" id="interview-chat" style="max-height: 400px; overflow-y: auto; padding-right: 10px; margin-bottom: 20px;">
+                            <!-- chat bubbles go here -->
+                        </div>
+                        <div class="chat-input-area mt-4">
+                            <textarea id="interview-answer-input" placeholder="Type your answer here..." rows="3" style="width: 100%; border-radius: 8px; padding: 10px; background: rgba(255,255,255,0.05); color: #fff; border: 1px solid rgba(255,255,255,0.2);"></textarea>
+                            <button id="submit-answer-btn" class="btn-modern-primary mt-3 w-full">Submit Answer & Get Feedback</button>
+                        </div>
                     </div>
                 </div>
             </div>
-        </div>
-    </div>
+        </section>
+    </main>
 
-    <script src="script.js?v=4"></script>
+    <script src="script.js?v=test3"></script>
 </body>
 </html>

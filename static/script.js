@@ -1,7 +1,9 @@
+// --- Global State ---
 let currentUserId = null;
 let currentUsername = null;
+let authToken = localStorage.getItem("jobify_token") || null;
 
-// ── ELEMENTS ──
+// --- Elements ---
 const pages = {
     login: document.getElementById('page-login'),
     home: document.getElementById('page-home'),
@@ -10,13 +12,21 @@ const pages = {
 };
 
 // Login
+const loginForm = document.getElementById('modern-login-form');
 const loginBtn = document.getElementById('login-btn');
 const loginInput = document.getElementById('login-username');
+const loginPass = document.getElementById('login-password');
+const pwdToggle = document.getElementById('pwd-toggle');
+const emailCheck = document.querySelector('.auth-check');
+const emailError = document.getElementById('email-error');
+const pwdStrength = document.getElementById('pwd-strength');
+const strengthFill = document.querySelector('.strength-fill');
+const strengthText = document.querySelector('.strength-text');
+
 
 // Upload
 const fileInput = document.getElementById('file-input');
 const uploadBtn = document.getElementById('upload-db-btn');
-const dropZone = document.getElementById('drop-zone');
 const fileInfo = document.getElementById('file-info');
 const fileNameSpan = document.getElementById('file-name');
 let selectedFile = null;
@@ -26,6 +36,7 @@ const displayUser = document.getElementById('display-user');
 const jobsContainer = document.getElementById('jobs-container');
 const trackerContainer = document.getElementById('tracker-container');
 
+// --- Helper Functions ---
 function switchPage(pageId) {
     Object.values(pages).forEach(p => p.classList.remove('active', 'hidden'));
     Object.values(pages).forEach(p => {
@@ -39,19 +50,87 @@ function showLoading(text) {
     switchPage('page-loading');
 }
 
-// ── LOGIN ──
-loginBtn.addEventListener('click', async () => {
-    const val = loginInput.value.trim();
-    if (!val) return;
+function getHeaders() {
+    return {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${authToken}`
+    };
+}
+
+// --- Premium Login UI Enhancements ---
+// Password Toggle
+pwdToggle.addEventListener('click', () => {
+    const type = loginPass.getAttribute('type') === 'password' ? 'text' : 'password';
+    loginPass.setAttribute('type', type);
+    pwdToggle.innerHTML = type === 'password' ? '<i class="fa-regular fa-eye"></i>' : '<i class="fa-regular fa-eye-slash"></i>';
+});
+
+// Real-time Username Validation
+loginInput.addEventListener('input', (e) => {
+    const val = e.target.value.trim();
+    if (val.length >= 3) {
+        emailCheck.classList.remove('hidden');
+        emailError.classList.remove('show');
+        loginInput.classList.remove('input-error');
+    } else {
+        emailCheck.classList.add('hidden');
+        if (val.length > 0) {
+            emailError.innerText = "Username must be at least 3 characters";
+            emailError.classList.add('show');
+            loginInput.classList.add('input-error');
+        } else {
+            emailError.classList.remove('show');
+            loginInput.classList.remove('input-error');
+        }
+    }
+});
+
+// Real-time Password Strength
+loginPass.addEventListener('input', (e) => {
+    const val = e.target.value;
+    if (val.length > 0) {
+        pwdStrength.classList.add('show');
+        let strength = 0;
+        if (val.length > 7) strength += 25;
+        if (/[A-Z]/.test(val)) strength += 25;
+        if (/[0-9]/.test(val)) strength += 25;
+        if (/[^A-Za-z0-9]/.test(val)) strength += 25;
+        
+        strengthFill.style.width = `${strength}%`;
+        
+        if (strength <= 25) { strengthFill.style.background = '#ef4444'; strengthText.innerText = 'Weak'; }
+        else if (strength <= 50) { strengthFill.style.background = '#f59e0b'; strengthText.innerText = 'Fair'; }
+        else if (strength <= 75) { strengthFill.style.background = '#3b82f6'; strengthText.innerText = 'Good'; }
+        else { strengthFill.style.background = '#10b981'; strengthText.innerText = 'Strong'; }
+    } else {
+        pwdStrength.classList.remove('show');
+    }
+});
+
+// --- Login Form Submission ---
+loginForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const username = loginInput.value.trim();
+    const password = loginPass.value.trim();
+    
+    if (!username || !password) return alert("Please enter both username and password.");
+    
+    const originalBtnHTML = loginBtn.innerHTML;
+    loginBtn.disabled = true;
+    loginBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> <span>Authenticating Engine...</span>';
+    
     try {
         const res = await fetch('/api/auth/login', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({username: val})
+            body: JSON.stringify({ username, password })
         });
-        const data = await res.json();
-        if (data.error) throw new Error(data.error);
         
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "Authentication Failed. Please check your credentials.");
+        
+        authToken = data.access_token;
+        localStorage.setItem("jobify_token", authToken);
         currentUserId = data.user_id;
         currentUsername = data.username;
         displayUser.innerText = currentUsername;
@@ -61,12 +140,15 @@ loginBtn.addEventListener('click', async () => {
         } else {
             switchPage('page-home');
         }
-    } catch (e) {
-        alert(e.message);
+    } catch (err) {
+        alert(err.message);
+    } finally {
+        loginBtn.disabled = false;
+        loginBtn.innerHTML = originalBtnHTML;
     }
 });
 
-// ── FILE UPLOAD ──
+// --- File Upload ---
 fileInput.addEventListener('change', (e) => {
     if (e.target.files.length > 0) {
         selectedFile = e.target.files[0];
@@ -81,14 +163,16 @@ uploadBtn.addEventListener('click', async () => {
     const fd = new FormData();
     fd.append('file', selectedFile);
     
-    showLoading("Saving resume to CRM...");
+    showLoading("Saving securely to CRM...");
     try {
         const res = await fetch(`/api/resume/upload/${currentUserId}`, {
             method: 'POST',
+            headers: { 'Authorization': `Bearer ${authToken}` }, // No Content-Type for FormData
             body: fd
         });
+        
         const data = await res.json();
-        if (data.error) throw new Error(data.error);
+        if (!res.ok) throw new Error(data.detail || "Upload error");
         
         loadDailyFeed();
     } catch (e) {
@@ -97,13 +181,13 @@ uploadBtn.addEventListener('click', async () => {
     }
 });
 
-// ── DAILY FEED & CRM ──
+// --- Dashboard ---
 async function loadDailyFeed() {
     showLoading("Consulting Agent & Fetching Jobs...");
     try {
-        const res = await fetch(`/api/jobs/feed/${currentUserId}`);
+        const res = await fetch(`/api/jobs/feed/${currentUserId}`, { headers: getHeaders() });
         const data = await res.json();
-        if (data.error) throw new Error(data.error);
+        if (!res.ok) throw new Error(data.detail || data.error || "Unknown server error");
         
         renderJobs(data.jobs || []);
         switchPage('page-results');
@@ -117,7 +201,7 @@ async function loadDailyFeed() {
 function renderJobs(jobs) {
     jobsContainer.innerHTML = '';
     if (jobs.length === 0) {
-        jobsContainer.innerHTML = '<p style="color:#aaa;text-align:center;">No jobs found today.</p>';
+        jobsContainer.innerHTML = '<p class="empty-state">No jobs found today. AI agents will search again tomorrow.</p>';
         return;
     }
     
@@ -125,22 +209,20 @@ function renderJobs(jobs) {
         const card = document.createElement('div');
         card.className = 'crm-job-card';
         card.innerHTML = `
-            <div style="display:flex; justify-content:space-between; align-items:start;">
+            <div class="card-header">
                 <div>
                     <h3>${job.role || job.title}</h3>
                     <p><i class="fa-solid fa-building"></i> ${job.company || 'Unknown Company'}</p>
-                    <div style="margin-bottom:1rem;">
-                        <span style="background:var(--bg); padding:0.25rem 0.5rem; border-radius:4px; font-size:0.8rem; border:1px solid #0f0; color:#0f0;">
-                            Deep Match: ${job.match_score}%
-                        </span>
-                    </div>
+                    <span class="deep-match-badge">Deep Match: ${job.match_score}%</span>
                 </div>
-                <button class="btn-outline" onclick="trackJob('${job.company || ''}', '${job.role || job.title}', '${job.url || ''}')">
+                <button class="btn-outline track-btn" onclick="trackJob('${job.company || ''}', '${job.role || job.title}', '${job.url || ''}')">
                     <i class="fa-solid fa-wand-magic-sparkles"></i> Track & Auto-Tailor
                 </button>
             </div>
-            <p><strong>Missing Skills:</strong> ${job.missing_skills ? job.missing_skills.join(', ') : 'None!'}</p>
-            <a href="${job.link || job.url}" target="_blank" style="color:var(--primary); text-decoration:none; font-size:0.9rem;">View Job <i class="fa-solid fa-arrow-right"></i></a>
+            <div class="card-footer">
+                <p><strong>Missing Skills:</strong> ${job.missing_skills ? job.missing_skills.join(', ') : 'None!'}</p>
+                <a href="${job.link || job.url}" target="_blank" class="view-link">View Job <i class="fa-solid fa-arrow-right"></i></a>
+            </div>
         `;
         jobsContainer.appendChild(card);
     });
@@ -151,21 +233,17 @@ window.trackJob = async function(company, title, url) {
     try {
         const res = await fetch('/api/applications/track', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                user_id: currentUserId,
-                company_name: company,
-                job_title: title,
-                description_url: url
-            })
+            headers: getHeaders(),
+            body: JSON.stringify({ user_id: currentUserId, company_name: company, job_title: title, description_url: url })
         });
         const data = await res.json();
+        if (!res.ok) throw new Error(data.detail);
         
         switchPage('page-results');
-        // switch tab
         document.querySelector('[data-pane="pane-tracker"]').click();
         loadTracker();
-        alert("Success! Your tailored draft is ready.");
+        
+        // Show success animation/toast instead of ugly alert in true prod
     } catch(e) {
         alert(e);
         switchPage('page-results');
@@ -174,37 +252,38 @@ window.trackJob = async function(company, title, url) {
 
 async function loadTracker() {
     try {
-        const res = await fetch(`/api/applications/${currentUserId}`);
+        const res = await fetch(`/api/applications/${currentUserId}`, { headers: getHeaders() });
         const apps = await res.json();
         
         trackerContainer.innerHTML = '';
         if(apps.length === 0) {
-            trackerContainer.innerHTML = '<p style="color:#aaa;text-align:center;">You haven\'t tracked any jobs yet.</p>';
+            trackerContainer.innerHTML = "<p class=\"empty-state\">You haven't tracked any jobs yet.</p>";
             return;
         }
         
         apps.forEach(app => {
             const card = document.createElement('div');
-            card.className = 'crm-job-card';
+            card.className = 'crm-job-card tracker-card';
             
             let bulletsHTML = '';
             if (app.tailored_resume_bullets) {
                 try {
                     const blts = JSON.parse(app.tailored_resume_bullets);
-                    bulletsHTML = blts.map(b => `• ${b}`).join('\n');
+                    bulletsHTML = blts.map(b => `<div class="bullet-item"><i class="fa-solid fa-circle bullet-dot"></i> ${b}</div>`).join('');
                 } catch(e) {}
             }
             
             card.innerHTML = `
-                <div style="display:flex; justify-content:space-between;">
+                <div class="tracker-header">
                     <div>
-                        <h3 style="color:var(--primary);">${app.job_title}</h3>
-                        <p><i class="fa-regular fa-building"></i> ${app.company_name} | Status: ${app.status}</p>
+                        <h3>${app.job_title}</h3>
+                        <p><i class="fa-regular fa-building"></i> ${app.company_name}</p>
                     </div>
+                    <span class="status-badge ready">${app.status}</span>
                 </div>
                 ${bulletsHTML ? `
-                    <div style="margin-top:1rem; border-top:1px solid var(--border); padding-top:1rem;">
-                        <span style="font-size:0.85rem; color:#aaa; text-transform:uppercase; letter-spacing:1px;">AI Tailored Bullets (Copy to application)</span>
+                    <div class="tailored-section">
+                        <div class="section-label"><i class="fa-solid fa-check-double"></i> AI Tailored Bullets (Copy to application)</div>
                         <div class="pre-tailored">${bulletsHTML}</div>
                     </div>
                 ` : ''}
@@ -216,7 +295,94 @@ async function loadTracker() {
     }
 }
 
-// ── TABS LOGIC ──
+// --- STUDIO LOGIC ---
+let interviewSessionId = null;
+
+const startBtn = document.getElementById('start-interview-btn');
+const setupDiv = document.getElementById('studio-setup');
+const activeDiv = document.getElementById('studio-active');
+const chatArea = document.getElementById('interview-chat');
+const submitAnswerBtn = document.getElementById('submit-answer-btn');
+const answerInput = document.getElementById('interview-answer-input');
+
+startBtn.addEventListener('click', async () => {
+    const role = document.getElementById('interview-role').value || "Senior Software Engineer";
+    const diff = document.getElementById('interview-diff').value || 5;
+
+    showLoading("Initiating AI Interviewer...");
+    try {
+        const res = await fetch('/interview/start', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ role: role, difficulty: diff, weak_areas: [] })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+
+        interviewSessionId = data.session_id;
+        
+        setupDiv.classList.add('hidden');
+        activeDiv.classList.remove('hidden');
+        
+        chatArea.innerHTML = `<div style="background: rgba(59, 130, 246, 0.1); border-left: 3px solid #3b82f6; padding: 15px; margin-bottom: 15px; border-radius: 4px;">
+            <strong style="color: #60a5fa;"><i class="fa-solid fa-robot"></i> Jobify Interview AI:</strong><br><br>${data.question}
+        </div>`;
+        
+        switchPage('page-results');
+    } catch(e) {
+        alert(e);
+        switchPage('page-results');
+    }
+});
+
+submitAnswerBtn.addEventListener('click', async () => {
+    const ans = answerInput.value.trim();
+    if (!ans) return;
+    
+    // Add User bubble
+    chatArea.innerHTML += `<div style="background: rgba(255, 255, 255, 0.05); padding: 15px; margin-bottom: 15px; border-radius: 4px; text-align: right;">
+        <strong style="color: #9ca3af;">You:</strong><br><br>${ans}
+    </div>`;
+    answerInput.value = '';
+    
+    // Loading bubble
+    const loaderId = 'loader-' + Date.now();
+    chatArea.innerHTML += `<div id="${loaderId}" style="background: rgba(59, 130, 246, 0.1); border-left: 3px solid #3b82f6; padding: 15px; margin-bottom: 15px; border-radius: 4px;">
+        <strong style="color: #60a5fa;"><i class="fa-solid fa-robot"></i> Jobify Interview AI:</strong><br><br><i class="fa-solid fa-spinner fa-spin"></i> Analyzing and preparing response...
+    </div>`;
+    chatArea.scrollTop = chatArea.scrollHeight;
+
+    try {
+        const res = await fetch('/interview/answer', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ session_id: interviewSessionId, answer: ans })
+        });
+        const data = await res.json();
+        
+        const loaderElt = document.getElementById(loaderId);
+        if (loaderElt) loaderElt.remove();
+
+        if (!res.ok) throw new Error(data.error);
+
+        const evalScore = data.evaluation?.score || "N/A";
+        const evalFb = data.evaluation?.improvements || "Good answer.";
+        
+        chatArea.innerHTML += `<div style="background: rgba(16, 185, 129, 0.1); border-left: 3px solid #10b981; padding: 15px; margin-bottom: 15px; border-radius: 4px;">
+            <strong style="color: #34d399;"><i class="fa-solid fa-check"></i> Analysis (Score: ${evalScore}/10):</strong><br><br>${evalFb}
+        </div>`;
+        
+        chatArea.innerHTML += `<div style="background: rgba(59, 130, 246, 0.1); border-left: 3px solid #3b82f6; padding: 15px; margin-bottom: 15px; border-radius: 4px;">
+            <strong style="color: #60a5fa;"><i class="fa-solid fa-robot"></i> Jobify Interview AI:</strong><br><br>${data.next_question}
+        </div>`;
+
+        chatArea.scrollTop = chatArea.scrollHeight;
+    } catch(e) {
+        alert("Error: " + e.message);
+    }
+});
+
+// --- TABS LOGIC ---
 const tabs = document.querySelectorAll('.tab');
 const panes = document.querySelectorAll('.pane');
 
@@ -231,19 +397,4 @@ tabs.forEach(tab => {
         document.getElementById(paneId).classList.remove('hidden');
         document.getElementById(paneId).classList.add('active');
     });
-});
-
-// Interactive Interview Stub mapping (retained logic)
-const intStartBtn = document.getElementById('start-interactive-btn');
-const intChat = document.getElementById('interview-chat');
-intStartBtn.addEventListener('click', () => {
-    intChat.classList.remove('hidden');
-    // Add stub text
-    document.getElementById('interview-chat-log').innerHTML = '<div style="color:#0f0;"><strong>Coach:</strong> Tell me about a time you used your matching skills in a real-world scenario.</div>';
-});
-document.getElementById('interview-answer-form').addEventListener('submit', (e) => {
-    e.preventDefault();
-    const val = document.getElementById('interview-answer-input').value;
-    document.getElementById('interview-chat-log').innerHTML += `<div style="color:#fff; text-align:right;"><strong>You:</strong> ${val}</div><div style="color:#0f0; margin-top:1rem;"><strong>Coach:</strong> Great response. The AI Evaluation functionality is connected!</div>`;
-    document.getElementById('interview-answer-input').value = '';
 });
