@@ -344,3 +344,50 @@ body {
 
 .fade-in { animation: fadeIn 0.4s ease forwards; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+/* ── Status Badges ── */
+.status-badge { padding: 0.3rem 0.8rem; border-radius: 99px; font-size: 0.75rem; font-weight: 700; }
+.status-badge.ready { background: var(--success-bg); color: var(--success); }
+.status-badge.tailoring { background: rgba(251,191,36,0.1); color: #fbbf24; }
+.tracker-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; margin-bottom: 0.5rem; }
+
+/* ── Empty State ── */
+.empty-state { color: var(--text-muted); font-size: 0.95rem; text-align: center; padding: 3rem 1rem; }
+
+/* ── Toast Notifications ── */
+.toast {
+    position: fixed; bottom: 2rem; right: 2rem; z-index: 9999;
+    background: var(--surface); border: 1px solid var(--border);
+    color: var(--text-primary); padding: 1rem 1.5rem;
+    border-radius: 12px; font-size: 0.9rem; font-weight: 500;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.4);
+    transform: translateY(20px); opacity: 0;
+    transition: all 0.3s ease; display: flex; align-items: center; gap: 0.75rem;
+}
+.toast.show { transform: translateY(0); opacity: 1; }
+.toast-success { border-color: rgba(16,185,129,0.3); }
+.toast-success i { color: var(--success); }
+.toast-error { border-color: rgba(239,68,68,0.3); }
+.toast-error i { color: #ef4444; }
+
+/* ── Interview Chat Bubbles ── */
+.chat-bubble { padding: 1rem 1.25rem; border-radius: 12px; margin-bottom: 1rem; line-height: 1.6; }
+.chat-bubble strong { display: block; font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 0.5rem; }
+.chat-bubble p { font-size: 0.95rem; margin: 0; }
+.ai-bubble { background: rgba(59,130,246,0.08); border-left: 3px solid #3b82f6; }
+.ai-bubble strong { color: #60a5fa; }
+.user-bubble { background: rgba(255,255,255,0.04); border-left: 3px solid var(--border); text-align: right; }
+.user-bubble strong { color: var(--text-muted); }
+.feedback-bubble { background: rgba(16,185,129,0.08); border-left: 3px solid var(--success); }
+.feedback-bubble strong { color: var(--success); }
+
+/* ── Studio Layout ── */
+.studio-container { display: flex; flex-direction: column; gap: 1.5rem; }
+#studio-active .chat-area { max-height: 420px; overflow-y: auto; padding-right: 8px; margin-bottom: 1rem; }
+#interview-answer-input {
+    width: 100%; background: rgba(0,0,0,0.3); border: 1px solid var(--border);
+    border-radius: 10px; padding: 0.9rem 1rem; color: var(--text-primary);
+    font-family: var(--font-body); font-size: 0.95rem; resize: vertical; min-height: 90px;
+    transition: border-color 0.2s;
+}
+#interview-answer-input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-glow); }

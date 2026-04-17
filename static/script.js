@@ -1,72 +1,85 @@
-// --- Global State ---
+/**
+ * Jobify AI CRM — Frontend Controller
+ * All API calls secured with JWT Bearer token stored in localStorage.
+ * New endpoints:  /api/auth/login  /api/resume/upload
+ *                 /api/jobs/feed   /api/jobs/track   /api/jobs/tracker
+ *                 /api/interview/start  /api/interview/answer
+ */
+
+// ─── State ────────────────────────────────────────────────────────────────────
 let currentUserId = null;
 let currentUsername = null;
 let authToken = localStorage.getItem("jobify_token") || null;
+let interviewSessionId = null;
 
-// --- Elements ---
+// ─── DOM refs ─────────────────────────────────────────────────────────────────
 const pages = {
-    login: document.getElementById('page-login'),
-    home: document.getElementById('page-home'),
+    login:   document.getElementById('page-login'),
+    home:    document.getElementById('page-home'),
     loading: document.getElementById('page-loading'),
-    results: document.getElementById('page-results')
+    results: document.getElementById('page-results'),
 };
 
-// Login
-const loginForm = document.getElementById('modern-login-form');
-const loginBtn = document.getElementById('login-btn');
-const loginInput = document.getElementById('login-username');
-const loginPass = document.getElementById('login-password');
-const pwdToggle = document.getElementById('pwd-toggle');
-const emailCheck = document.querySelector('.auth-check');
-const emailError = document.getElementById('email-error');
-const pwdStrength = document.getElementById('pwd-strength');
+const loginForm    = document.getElementById('modern-login-form');
+const loginBtn     = document.getElementById('login-btn');
+const loginInput   = document.getElementById('login-username');
+const loginPass    = document.getElementById('login-password');
+const pwdToggle    = document.getElementById('pwd-toggle');
+const emailCheck   = document.querySelector('.auth-check');
+const emailError   = document.getElementById('email-error');
+const pwdStrength  = document.getElementById('pwd-strength');
 const strengthFill = document.querySelector('.strength-fill');
 const strengthText = document.querySelector('.strength-text');
 
-
-// Upload
-const fileInput = document.getElementById('file-input');
-const uploadBtn = document.getElementById('upload-db-btn');
-const fileInfo = document.getElementById('file-info');
+const fileInput  = document.getElementById('file-input');
+const uploadBtn  = document.getElementById('upload-db-btn');
+const fileInfo   = document.getElementById('file-info');
 const fileNameSpan = document.getElementById('file-name');
 let selectedFile = null;
 
-// Results
-const displayUser = document.getElementById('display-user');
-const jobsContainer = document.getElementById('jobs-container');
+const displayUser      = document.getElementById('display-user');
+const jobsContainer    = document.getElementById('jobs-container');
 const trackerContainer = document.getElementById('tracker-container');
 
-// --- Helper Functions ---
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 function switchPage(pageId) {
-    Object.values(pages).forEach(p => p.classList.remove('active', 'hidden'));
     Object.values(pages).forEach(p => {
-        if (p.id !== pageId) p.classList.add('hidden');
-        else p.classList.add('active');
+        p.classList.toggle('hidden', p.id !== pageId);
+        p.classList.toggle('active', p.id === pageId);
     });
 }
 
-function showLoading(text) {
+function showLoading(text = 'Processing...') {
     document.getElementById('loading-text').innerText = text;
     switchPage('page-loading');
 }
 
-function getHeaders() {
+function getAuthHeaders() {
     return {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${authToken}`
+        'Authorization': `Bearer ${authToken}`,
     };
 }
 
-// --- Premium Login UI Enhancements ---
-// Password Toggle
+function showToast(message, type = 'success') {
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.innerHTML = `<i class="fa-solid fa-${type === 'success' ? 'check-circle' : 'circle-exclamation'}"></i> ${message}`;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.classList.add('show'), 10);
+    setTimeout(() => { toast.classList.remove('show'); setTimeout(() => toast.remove(), 300); }, 3500);
+}
+
+// ─── Login UI Enhancements ────────────────────────────────────────────────────
 pwdToggle.addEventListener('click', () => {
     const type = loginPass.getAttribute('type') === 'password' ? 'text' : 'password';
     loginPass.setAttribute('type', type);
-    pwdToggle.innerHTML = type === 'password' ? '<i class="fa-regular fa-eye"></i>' : '<i class="fa-regular fa-eye-slash"></i>';
+    pwdToggle.innerHTML = type === 'password'
+        ? '<i class="fa-regular fa-eye"></i>'
+        : '<i class="fa-regular fa-eye-slash"></i>';
 });
 
-// Real-time Username Validation
-loginInput.addEventListener('input', (e) => {
+loginInput.addEventListener('input', e => {
     const val = e.target.value.trim();
     if (val.length >= 3) {
         emailCheck.classList.remove('hidden');
@@ -75,7 +88,7 @@ loginInput.addEventListener('input', (e) => {
     } else {
         emailCheck.classList.add('hidden');
         if (val.length > 0) {
-            emailError.innerText = "Username must be at least 3 characters";
+            emailError.innerText = 'Username must be at least 3 characters';
             emailError.classList.add('show');
             loginInput.classList.add('input-error');
         } else {
@@ -85,8 +98,7 @@ loginInput.addEventListener('input', (e) => {
     }
 });
 
-// Real-time Password Strength
-loginPass.addEventListener('input', (e) => {
+loginPass.addEventListener('input', e => {
     const val = e.target.value;
     if (val.length > 0) {
         pwdStrength.classList.add('show');
@@ -95,9 +107,7 @@ loginPass.addEventListener('input', (e) => {
         if (/[A-Z]/.test(val)) strength += 25;
         if (/[0-9]/.test(val)) strength += 25;
         if (/[^A-Za-z0-9]/.test(val)) strength += 25;
-        
         strengthFill.style.width = `${strength}%`;
-        
         if (strength <= 25) { strengthFill.style.background = '#ef4444'; strengthText.innerText = 'Weak'; }
         else if (strength <= 50) { strengthFill.style.background = '#f59e0b'; strengthText.innerText = 'Fair'; }
         else if (strength <= 75) { strengthFill.style.background = '#3b82f6'; strengthText.innerText = 'Good'; }
@@ -107,30 +117,28 @@ loginPass.addEventListener('input', (e) => {
     }
 });
 
-// --- Login Form Submission ---
-loginForm.addEventListener('submit', async (e) => {
+// ─── Login Submission ──────────────────────────────────────────────────────────
+loginForm.addEventListener('submit', async e => {
     e.preventDefault();
     const username = loginInput.value.trim();
-    const password = loginPass.value.trim();
-    
-    if (!username || !password) return alert("Please enter both username and password.");
-    
-    const originalBtnHTML = loginBtn.innerHTML;
+    const password = loginPass.value;
+    if (!username || !password) return showToast('Please enter both username and password.', 'error');
+
+    const originalHTML = loginBtn.innerHTML;
     loginBtn.disabled = true;
-    loginBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> <span>Authenticating Engine...</span>';
-    
+    loginBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> <span>Authenticating...</span>';
+
     try {
         const res = await fetch('/api/auth/login', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ username, password })
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password }),
         });
-        
         const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || "Authentication Failed. Please check your credentials.");
-        
+        if (!res.ok) throw new Error(data.error || 'Authentication failed.');
+
         authToken = data.access_token;
-        localStorage.setItem("jobify_token", authToken);
+        localStorage.setItem('jobify_token', authToken);
         currentUserId = data.user_id;
         currentUsername = data.username;
         displayUser.innerText = currentUsername;
@@ -141,15 +149,15 @@ loginForm.addEventListener('submit', async (e) => {
             switchPage('page-home');
         }
     } catch (err) {
-        alert(err.message);
+        showToast(err.message, 'error');
     } finally {
         loginBtn.disabled = false;
-        loginBtn.innerHTML = originalBtnHTML;
+        loginBtn.innerHTML = originalHTML;
     }
 });
 
-// --- File Upload ---
-fileInput.addEventListener('change', (e) => {
+// ─── File Upload ──────────────────────────────────────────────────────────────
+fileInput.addEventListener('change', e => {
     if (e.target.files.length > 0) {
         selectedFile = e.target.files[0];
         fileInfo.classList.remove('hidden');
@@ -159,41 +167,38 @@ fileInput.addEventListener('change', (e) => {
 });
 
 uploadBtn.addEventListener('click', async () => {
-    if (!selectedFile || !currentUserId) return;
+    if (!selectedFile || !authToken) return;
     const fd = new FormData();
     fd.append('file', selectedFile);
-    
-    showLoading("Saving securely to CRM...");
+
+    showLoading('Saving resume securely...');
     try {
-        const res = await fetch(`/api/resume/upload/${currentUserId}`, {
+        const res = await fetch('/api/resume/upload', {
             method: 'POST',
-            headers: { 'Authorization': `Bearer ${authToken}` }, // No Content-Type for FormData
-            body: fd
+            headers: { 'Authorization': `Bearer ${authToken}` },
+            body: fd,
         });
-        
         const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || "Upload error");
-        
+        if (!res.ok) throw new Error(data.error || 'Upload failed.');
         loadDailyFeed();
-    } catch (e) {
-        alert("Upload error: " + e.message);
+    } catch (err) {
+        showToast(err.message, 'error');
         switchPage('page-home');
     }
 });
 
-// --- Dashboard ---
+// ─── Job Feed ─────────────────────────────────────────────────────────────────
 async function loadDailyFeed() {
-    showLoading("Consulting Agent & Fetching Jobs...");
+    showLoading('AI agents analysing your profile...');
     try {
-        const res = await fetch(`/api/jobs/feed/${currentUserId}`, { headers: getHeaders() });
+        const res = await fetch('/api/jobs/feed', { headers: getAuthHeaders() });
         const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || data.error || "Unknown server error");
-        
+        if (!res.ok) throw new Error(data.error || 'Feed error');
         renderJobs(data.jobs || []);
         switchPage('page-results');
         loadTracker();
-    } catch (e) {
-        alert("Error fetching feed: " + e.message);
+    } catch (err) {
+        showToast('Feed error: ' + err.message, 'error');
         switchPage('page-login');
     }
 }
@@ -201,136 +206,152 @@ async function loadDailyFeed() {
 function renderJobs(jobs) {
     jobsContainer.innerHTML = '';
     if (jobs.length === 0) {
-        jobsContainer.innerHTML = '<p class="empty-state">No jobs found today. AI agents will search again tomorrow.</p>';
+        jobsContainer.innerHTML = '<p class="empty-state">No matching jobs found. Try uploading an updated resume.</p>';
         return;
     }
-    
     jobs.forEach(job => {
         const card = document.createElement('div');
         card.className = 'crm-job-card';
+        // Sanitize before injecting — prevents XSS from AI-generated content
+        const title   = sanitize(job.role || job.title || 'Unknown Role');
+        const company = sanitize(job.company || 'Unknown Company');
+        const score   = Number(job.match_score) || 0;
+        const missing = Array.isArray(job.missing_skills) ? job.missing_skills.map(sanitize).join(', ') : 'None';
+        const link    = job.link || job.url || '#';
+
         card.innerHTML = `
             <div class="card-header">
                 <div>
-                    <h3>${job.role || job.title}</h3>
-                    <p><i class="fa-solid fa-building"></i> ${job.company || 'Unknown Company'}</p>
-                    <span class="deep-match-badge">Deep Match: ${job.match_score}%</span>
+                    <h3>${title}</h3>
+                    <p><i class="fa-solid fa-building"></i> ${company}</p>
+                    <span class="deep-match-badge">Match: ${score}%</span>
                 </div>
-                <button class="btn-outline track-btn" onclick="trackJob('${job.company || ''}', '${job.role || job.title}', '${job.url || ''}')">
-                    <i class="fa-solid fa-wand-magic-sparkles"></i> Track & Auto-Tailor
+                <button class="btn-outline track-btn" data-company="${company}" data-title="${title}" data-url="${sanitize(link)}">
+                    <i class="fa-solid fa-wand-magic-sparkles"></i> Track &amp; Auto-Tailor
                 </button>
             </div>
             <div class="card-footer">
-                <p><strong>Missing Skills:</strong> ${job.missing_skills ? job.missing_skills.join(', ') : 'None!'}</p>
-                <a href="${job.link || job.url}" target="_blank" class="view-link">View Job <i class="fa-solid fa-arrow-right"></i></a>
-            </div>
-        `;
+                <p><strong>Missing Skills:</strong> ${missing}</p>
+                <a href="${sanitize(link)}" target="_blank" rel="noopener" class="view-link">View Job <i class="fa-solid fa-arrow-right"></i></a>
+            </div>`;
         jobsContainer.appendChild(card);
     });
+
+    // Event delegation — no inline onclick
+    jobsContainer.addEventListener('click', e => {
+        const btn = e.target.closest('.track-btn');
+        if (btn) trackJob(btn.dataset.company, btn.dataset.title, btn.dataset.url);
+    }, { once: true });
 }
 
-window.trackJob = async function(company, title, url) {
-    showLoading("AI is tailoring your resume for this role...");
+// ─── Tracker ──────────────────────────────────────────────────────────────────
+async function trackJob(company, title, url) {
+    showLoading('Submitting to tracker...');
     try {
-        const res = await fetch('/api/applications/track', {
+        const res = await fetch('/api/jobs/track', {
             method: 'POST',
-            headers: getHeaders(),
-            body: JSON.stringify({ user_id: currentUserId, company_name: company, job_title: title, description_url: url })
+            headers: getAuthHeaders(),
+            body: JSON.stringify({ company_name: company, job_title: title, description_url: url }),
         });
         const data = await res.json();
-        if (!res.ok) throw new Error(data.detail);
-        
+        if (!res.ok) throw new Error(data.error);
+
         switchPage('page-results');
         document.querySelector('[data-pane="pane-tracker"]').click();
+        showToast('Job tracked! AI is tailoring your resume in the background.');
+        // Poll tracker every 5 seconds until status changes from "Tailoring..."
         loadTracker();
-        
-        // Show success animation/toast instead of ugly alert in true prod
-    } catch(e) {
-        alert(e);
+        const poll = setInterval(async () => {
+            await loadTracker();
+            const cards = trackerContainer.querySelectorAll('.status-badge');
+            const stillTailoring = [...cards].some(c => c.textContent.includes('Tailoring'));
+            if (!stillTailoring) clearInterval(poll);
+        }, 5000);
+    } catch (err) {
+        showToast(err.message, 'error');
         switchPage('page-results');
     }
-};
+}
 
 async function loadTracker() {
     try {
-        const res = await fetch(`/api/applications/${currentUserId}`, { headers: getHeaders() });
+        const res = await fetch('/api/jobs/tracker', { headers: getAuthHeaders() });
+        if (!res.ok) return;
         const apps = await res.json();
-        
+
         trackerContainer.innerHTML = '';
-        if(apps.length === 0) {
-            trackerContainer.innerHTML = "<p class=\"empty-state\">You haven't tracked any jobs yet.</p>";
+        if (apps.length === 0) {
+            trackerContainer.innerHTML = '<p class="empty-state">No tracked jobs yet. Click "Track & Auto-Tailor" on a job card.</p>';
             return;
         }
-        
+
         apps.forEach(app => {
             const card = document.createElement('div');
             card.className = 'crm-job-card tracker-card';
-            
+
             let bulletsHTML = '';
             if (app.tailored_resume_bullets) {
                 try {
-                    const blts = JSON.parse(app.tailored_resume_bullets);
-                    bulletsHTML = blts.map(b => `<div class="bullet-item"><i class="fa-solid fa-circle bullet-dot"></i> ${b}</div>`).join('');
-                } catch(e) {}
+                    const bullets = JSON.parse(app.tailored_resume_bullets);
+                    bulletsHTML = bullets.map(b => `
+                        <div class="bullet-item">
+                            <i class="fa-solid fa-circle bullet-dot"></i>
+                            ${sanitize(b)}
+                        </div>`).join('');
+                } catch (_) {}
             }
-            
+
+            const statusClass = app.status === 'Draft Ready' ? 'ready' : app.status === 'Tailoring...' ? 'tailoring' : '';
             card.innerHTML = `
                 <div class="tracker-header">
                     <div>
-                        <h3>${app.job_title}</h3>
-                        <p><i class="fa-regular fa-building"></i> ${app.company_name}</p>
+                        <h3>${sanitize(app.job_title)}</h3>
+                        <p><i class="fa-regular fa-building"></i> ${sanitize(app.company_name || '')}</p>
                     </div>
-                    <span class="status-badge ready">${app.status}</span>
+                    <span class="status-badge ${statusClass}">${sanitize(app.status)}</span>
                 </div>
                 ${bulletsHTML ? `
                     <div class="tailored-section">
-                        <div class="section-label"><i class="fa-solid fa-check-double"></i> AI Tailored Bullets (Copy to application)</div>
+                        <div class="section-label"><i class="fa-solid fa-check-double"></i> AI Tailored Resume Bullets</div>
                         <div class="pre-tailored">${bulletsHTML}</div>
-                    </div>
-                ` : ''}
+                    </div>` : (app.status === 'Tailoring...' ? '<p class="empty-state" style="margin-top:1rem"><i class="fa-solid fa-spinner fa-spin"></i> AI is tailoring your resume...</p>' : '')}
             `;
             trackerContainer.appendChild(card);
         });
-    } catch(e) {
-        console.error(e);
+    } catch (err) {
+        console.error('Tracker load error:', err);
     }
 }
 
-// --- STUDIO LOGIC ---
-let interviewSessionId = null;
-
-const startBtn = document.getElementById('start-interview-btn');
-const setupDiv = document.getElementById('studio-setup');
-const activeDiv = document.getElementById('studio-active');
-const chatArea = document.getElementById('interview-chat');
+// ─── Interview Studio ────────────────────────────────────────────────────────
+const startBtn       = document.getElementById('start-interview-btn');
+const setupDiv       = document.getElementById('studio-setup');
+const activeDiv      = document.getElementById('studio-active');
+const chatArea       = document.getElementById('interview-chat');
 const submitAnswerBtn = document.getElementById('submit-answer-btn');
-const answerInput = document.getElementById('interview-answer-input');
+const answerInput    = document.getElementById('interview-answer-input');
 
 startBtn.addEventListener('click', async () => {
-    const role = document.getElementById('interview-role').value || "Senior Software Engineer";
-    const diff = document.getElementById('interview-diff').value || 5;
+    const role = document.getElementById('interview-role').value.trim() || 'Software Engineer';
+    const diff = parseInt(document.getElementById('interview-diff').value) || 5;
 
-    showLoading("Initiating AI Interviewer...");
+    showLoading('Initialising AI Interviewer...');
     try {
-        const res = await fetch('/interview/start', {
+        const res = await fetch('/api/interview/start', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ role: role, difficulty: diff, weak_areas: [] })
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ role, difficulty: diff, weak_areas: [] }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error);
 
         interviewSessionId = data.session_id;
-        
         setupDiv.classList.add('hidden');
         activeDiv.classList.remove('hidden');
-        
-        chatArea.innerHTML = `<div style="background: rgba(59, 130, 246, 0.1); border-left: 3px solid #3b82f6; padding: 15px; margin-bottom: 15px; border-radius: 4px;">
-            <strong style="color: #60a5fa;"><i class="fa-solid fa-robot"></i> Jobify Interview AI:</strong><br><br>${data.question}
-        </div>`;
-        
+        chatArea.innerHTML = aiChatBubble(data.question);
         switchPage('page-results');
-    } catch(e) {
-        alert(e);
+    } catch (err) {
+        showToast(err.message, 'error');
         switchPage('page-results');
     }
 });
@@ -338,63 +359,70 @@ startBtn.addEventListener('click', async () => {
 submitAnswerBtn.addEventListener('click', async () => {
     const ans = answerInput.value.trim();
     if (!ans) return;
-    
-    // Add User bubble
-    chatArea.innerHTML += `<div style="background: rgba(255, 255, 255, 0.05); padding: 15px; margin-bottom: 15px; border-radius: 4px; text-align: right;">
-        <strong style="color: #9ca3af;">You:</strong><br><br>${ans}
-    </div>`;
+
+    chatArea.innerHTML += userChatBubble(ans);
     answerInput.value = '';
-    
-    // Loading bubble
     const loaderId = 'loader-' + Date.now();
-    chatArea.innerHTML += `<div id="${loaderId}" style="background: rgba(59, 130, 246, 0.1); border-left: 3px solid #3b82f6; padding: 15px; margin-bottom: 15px; border-radius: 4px;">
-        <strong style="color: #60a5fa;"><i class="fa-solid fa-robot"></i> Jobify Interview AI:</strong><br><br><i class="fa-solid fa-spinner fa-spin"></i> Analyzing and preparing response...
-    </div>`;
+    chatArea.innerHTML += loadingBubble(loaderId);
     chatArea.scrollTop = chatArea.scrollHeight;
 
     try {
-        const res = await fetch('/interview/answer', {
+        const res = await fetch('/api/interview/answer', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ session_id: interviewSessionId, answer: ans })
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ session_id: interviewSessionId, answer: ans }),
         });
         const data = await res.json();
-        
-        const loaderElt = document.getElementById(loaderId);
-        if (loaderElt) loaderElt.remove();
-
+        document.getElementById(loaderId)?.remove();
         if (!res.ok) throw new Error(data.error);
 
-        const evalScore = data.evaluation?.score || "N/A";
-        const evalFb = data.evaluation?.improvements || "Good answer.";
-        
-        chatArea.innerHTML += `<div style="background: rgba(16, 185, 129, 0.1); border-left: 3px solid #10b981; padding: 15px; margin-bottom: 15px; border-radius: 4px;">
-            <strong style="color: #34d399;"><i class="fa-solid fa-check"></i> Analysis (Score: ${evalScore}/10):</strong><br><br>${evalFb}
-        </div>`;
-        
-        chatArea.innerHTML += `<div style="background: rgba(59, 130, 246, 0.1); border-left: 3px solid #3b82f6; padding: 15px; margin-bottom: 15px; border-radius: 4px;">
-            <strong style="color: #60a5fa;"><i class="fa-solid fa-robot"></i> Jobify Interview AI:</strong><br><br>${data.next_question}
-        </div>`;
-
+        const score = data.evaluation?.score ?? 'N/A';
+        const feedback = data.evaluation?.improvements || 'Good answer!';
+        chatArea.innerHTML += feedbackBubble(score, sanitize(feedback));
+        chatArea.innerHTML += aiChatBubble(sanitize(data.next_question || ''));
         chatArea.scrollTop = chatArea.scrollHeight;
-    } catch(e) {
-        alert("Error: " + e.message);
+    } catch (err) {
+        document.getElementById(loaderId)?.remove();
+        showToast(err.message, 'error');
     }
 });
 
-// --- TABS LOGIC ---
-const tabs = document.querySelectorAll('.tab');
-const panes = document.querySelectorAll('.pane');
+// ─── Chat bubble templates ────────────────────────────────────────────────────
+const aiChatBubble = q => `
+    <div class="chat-bubble ai-bubble">
+        <strong><i class="fa-solid fa-robot"></i> Jobify AI</strong>
+        <p>${q}</p>
+    </div>`;
+const userChatBubble = a => `
+    <div class="chat-bubble user-bubble">
+        <strong>You</strong>
+        <p>${sanitize(a)}</p>
+    </div>`;
+const feedbackBubble = (score, fb) => `
+    <div class="chat-bubble feedback-bubble">
+        <strong><i class="fa-solid fa-check"></i> Analysis — Score: ${score}/10</strong>
+        <p>${fb}</p>
+    </div>`;
+const loadingBubble = id => `
+    <div id="${id}" class="chat-bubble ai-bubble">
+        <strong><i class="fa-solid fa-robot"></i> Jobify AI</strong>
+        <p><i class="fa-solid fa-spinner fa-spin"></i> Thinking...</p>
+    </div>`;
 
-tabs.forEach(tab => {
+// ─── Tab navigation ───────────────────────────────────────────────────────────
+document.querySelectorAll('.tab').forEach(tab => {
     tab.addEventListener('click', () => {
-        tabs.forEach(t => t.classList.remove('active'));
-        panes.forEach(p => p.classList.remove('active', 'hidden'));
-        panes.forEach(p => p.classList.add('hidden'));
-        
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.pane').forEach(p => { p.classList.add('hidden'); p.classList.remove('active'); });
         tab.classList.add('active');
-        const paneId = tab.getAttribute('data-pane');
-        document.getElementById(paneId).classList.remove('hidden');
-        document.getElementById(paneId).classList.add('active');
+        const pane = document.getElementById(tab.dataset.pane);
+        if (pane) { pane.classList.remove('hidden'); pane.classList.add('active'); }
     });
 });
+
+// ─── Security: XSS sanitizer ─────────────────────────────────────────────────
+function sanitize(str) {
+    if (typeof str !== 'string') return '';
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+              .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+}
