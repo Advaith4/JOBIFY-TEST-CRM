@@ -189,15 +189,32 @@ uploadBtn.addEventListener('click', async () => {
 
 // ─── Job Feed ─────────────────────────────────────────────────────────────────
 async function loadDailyFeed() {
-    showLoading('AI agents analysing your profile...');
+    switchPage('page-loading');
+    const loadingText = document.getElementById('loading-text');
+    const steps = [
+        'Parsing your resume...',
+        'Inferring best-fit roles with AI...',
+        'Searching live job listings...',
+        'Scoring and ranking your matches...',
+        'Almost there...'
+    ];
+    let stepIdx = 0;
+    loadingText.innerText = steps[0];
+    const stepTimer = setInterval(() => {
+        stepIdx = Math.min(stepIdx + 1, steps.length - 1);
+        loadingText.innerText = steps[stepIdx];
+    }, 9000);
+
     try {
         const res = await fetch('/api/jobs/feed', { headers: getAuthHeaders() });
         const data = await res.json();
+        clearInterval(stepTimer);
         if (!res.ok) throw new Error(data.error || 'Feed error');
         renderJobs(data.jobs || []);
         switchPage('page-results');
         loadTracker();
     } catch (err) {
+        clearInterval(stepTimer);
         showToast('Feed error: ' + err.message, 'error');
         switchPage('page-login');
     }
@@ -231,17 +248,19 @@ function renderJobs(jobs) {
                 </button>
             </div>
             <div class="card-footer">
-                <p><strong>Missing Skills:</strong> ${missing}</p>
-                <a href="${sanitize(link)}" target="_blank" rel="noopener" class="view-link">View Job <i class="fa-solid fa-arrow-right"></i></a>
+                <p><strong>Missing Skills:</strong> ${missing || 'None — great fit!'}</p>
+                <div class="card-footer-row">
+                    <a href="${sanitize(link)}" target="_blank" rel="noopener" class="view-link">View Job <i class="fa-solid fa-arrow-right"></i></a>
+                </div>
             </div>`;
         jobsContainer.appendChild(card);
     });
 
-    // Event delegation — no inline onclick
+    // Event delegation — handles all track buttons on the page
     jobsContainer.addEventListener('click', e => {
         const btn = e.target.closest('.track-btn');
         if (btn) trackJob(btn.dataset.company, btn.dataset.title, btn.dataset.url);
-    }, { once: true });
+    });
 }
 
 // ─── Tracker ──────────────────────────────────────────────────────────────────
@@ -323,91 +342,243 @@ async function loadTracker() {
     }
 }
 
-// ─── Interview Studio ────────────────────────────────────────────────────────
-const startBtn       = document.getElementById('start-interview-btn');
-const setupDiv       = document.getElementById('studio-setup');
-const activeDiv      = document.getElementById('studio-active');
-const chatArea       = document.getElementById('interview-chat');
+// ─── Interview Studio (VOXA-style Chatbot) ───────────────────────────────────
+const startBtn        = document.getElementById('start-interview-btn');
+const newInterviewBtn = document.getElementById('new-interview-btn');
+const activeDiv       = document.getElementById('studio-active');
+const chatMessages    = document.getElementById('interview-chat');
 const submitAnswerBtn = document.getElementById('submit-answer-btn');
-const answerInput    = document.getElementById('interview-answer-input');
+const answerInput     = document.getElementById('interview-answer-input');
+const emptyState      = document.getElementById('chat-empty-state');
+const diffSlider      = document.getElementById('interview-diff');
+const diffLabel       = document.getElementById('diff-label');
+const sessionsList    = document.getElementById('sessions-list');
+let scores = [];
+let activeSidebarItem = null;
 
+// Diff slider live label
+if (diffSlider) {
+    diffSlider.addEventListener('input', () => {
+        diffLabel.textContent = diffSlider.value;
+        const pct = ((diffSlider.value - 1) / 9) * 100;
+        diffSlider.style.background = `linear-gradient(to right, var(--primary) ${pct}%, rgba(255,255,255,0.1) ${pct}%)`;
+    });
+}
+
+// Auto-grow textarea
+answerInput.addEventListener('input', () => {
+    answerInput.style.height = 'auto';
+    answerInput.style.height = Math.min(answerInput.scrollHeight, 140) + 'px';
+});
+
+// Shift+Enter = new line, Enter = submit
+answerInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitAnswerBtn.click(); }
+});
+
+// ── Start new session ────────────────────────────────────────
 startBtn.addEventListener('click', async () => {
     const role = document.getElementById('interview-role').value.trim() || 'Software Engineer';
-    const diff = parseInt(document.getElementById('interview-diff').value) || 5;
+    const diff = parseInt(diffSlider?.value) || 5;
 
-    showLoading('Initialising AI Interviewer...');
+    setStartBtnLoading(true);
     try {
         const res = await fetch('/api/interview/start', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: getAuthHeaders(),
             body: JSON.stringify({ role, difficulty: diff, weak_areas: [] }),
         });
         const data = await res.json();
-        if (!res.ok) throw new Error(data.error);
+        if (!res.ok) throw new Error(data.error || data.detail);
 
         interviewSessionId = data.session_id;
-        setupDiv.classList.add('hidden');
-        activeDiv.classList.remove('hidden');
-        chatArea.innerHTML = aiChatBubble(data.question);
-        switchPage('page-results');
+        scores = [];
+
+        openChatView(role, diff);
+        appendMsg('ai', data.question);
+        loadSessionsList();  // refresh sidebar
     } catch (err) {
         showToast(err.message, 'error');
-        switchPage('page-results');
+    } finally {
+        setStartBtnLoading(false);
     }
 });
 
+// ── New interview button (reset form) ────────────────────────
+newInterviewBtn.addEventListener('click', () => {
+    document.getElementById('sidebar-setup').classList.remove('hidden');
+    emptyState.classList.remove('hidden');
+    activeDiv.classList.add('hidden');
+    if (activeSidebarItem) { activeSidebarItem.classList.remove('active'); activeSidebarItem = null; }
+    interviewSessionId = null;
+    scores = [];
+    chatMessages.innerHTML = '';
+    document.getElementById('interview-role').value = '';
+    diffSlider.value = 5;
+    diffLabel.textContent = '5';
+});
+
+// ── Submit answer ────────────────────────────────────────────
 submitAnswerBtn.addEventListener('click', async () => {
     const ans = answerInput.value.trim();
-    if (!ans) return;
+    if (!ans || !interviewSessionId) return;
 
-    chatArea.innerHTML += userChatBubble(ans);
+    appendMsg('user', ans);
     answerInput.value = '';
-    const loaderId = 'loader-' + Date.now();
-    chatArea.innerHTML += loadingBubble(loaderId);
-    chatArea.scrollTop = chatArea.scrollHeight;
+    answerInput.style.height = 'auto';
+    submitAnswerBtn.disabled = true;
+
+    const typingId = appendTyping();
 
     try {
         const res = await fetch('/api/interview/answer', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: getAuthHeaders(),
             body: JSON.stringify({ session_id: interviewSessionId, answer: ans }),
         });
         const data = await res.json();
-        document.getElementById(loaderId)?.remove();
-        if (!res.ok) throw new Error(data.error);
+        removeTyping(typingId);
+        if (!res.ok) throw new Error(data.error || data.detail);
 
-        const score = data.evaluation?.score ?? 'N/A';
-        const feedback = data.evaluation?.improvements || 'Good answer!';
-        chatArea.innerHTML += feedbackBubble(score, sanitize(feedback));
-        chatArea.innerHTML += aiChatBubble(sanitize(data.next_question || ''));
-        chatArea.scrollTop = chatArea.scrollHeight;
+        const score = data.evaluation?.score ?? null;
+        const feedback = data.evaluation?.improvements || '';
+
+        if (feedback) appendMsg('feedback', feedback, score);
+        if (data.next_question) appendMsg('ai', data.next_question);
+
+        if (score !== null) {
+            scores.push(score);
+            const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
+            document.getElementById('chat-score-display').textContent = `Avg Score: ${avg.toFixed(1)}/10`;
+        }
     } catch (err) {
-        document.getElementById(loaderId)?.remove();
+        removeTyping(typingId);
         showToast(err.message, 'error');
+    } finally {
+        submitAnswerBtn.disabled = false;
+        answerInput.focus();
     }
 });
 
-// ─── Chat bubble templates ────────────────────────────────────────────────────
-const aiChatBubble = q => `
-    <div class="chat-bubble ai-bubble">
-        <strong><i class="fa-solid fa-robot"></i> Jobify AI</strong>
-        <p>${q}</p>
-    </div>`;
-const userChatBubble = a => `
-    <div class="chat-bubble user-bubble">
-        <strong>You</strong>
-        <p>${sanitize(a)}</p>
-    </div>`;
-const feedbackBubble = (score, fb) => `
-    <div class="chat-bubble feedback-bubble">
-        <strong><i class="fa-solid fa-check"></i> Analysis — Score: ${score}/10</strong>
-        <p>${fb}</p>
-    </div>`;
-const loadingBubble = id => `
-    <div id="${id}" class="chat-bubble ai-bubble">
-        <strong><i class="fa-solid fa-robot"></i> Jobify AI</strong>
-        <p><i class="fa-solid fa-spinner fa-spin"></i> Thinking...</p>
-    </div>`;
+// ── Load past sessions into sidebar ─────────────────────────
+async function loadSessionsList() {
+    if (!authToken) return;
+    try {
+        const res = await fetch('/api/interview/sessions', { headers: getAuthHeaders() });
+        if (!res.ok) return;
+        const sessions = await res.json();
+        sessionsList.innerHTML = '';
+        if (sessions.length === 0) {
+            sessionsList.innerHTML = '<p class="sidebar-empty">No sessions yet.</p>';
+            return;
+        }
+        sessions.forEach(s => {
+            const item = document.createElement('div');
+            item.className = 'session-item';
+            item.dataset.id = s.id;
+            item.dataset.token = s.session_token;
+            const date = new Date(s.created_at).toLocaleDateString('en-IN', { month: 'short', day: 'numeric' });
+            const scoreText = s.avg_score !== null ? `<span class="session-score">⭐ ${Number(s.avg_score).toFixed(1)}</span>` : '';
+            item.innerHTML = `
+                <div class="session-role">${sanitize(s.role)}</div>
+                <div class="session-meta">
+                    <span>${date}</span>
+                    <span>D:${s.difficulty}</span>
+                    ${scoreText}
+                </div>`;
+            item.addEventListener('click', () => loadSessionHistory(s.id, s.role, s.difficulty, item));
+            sessionsList.appendChild(item);
+        });
+    } catch (err) {
+        console.error('Session list error:', err);
+    }
+}
+
+// ── Load a specific session's history ────────────────────────
+async function loadSessionHistory(sessionDbId, role, difficulty, sidebarEl) {
+    try {
+        const res = await fetch(`/api/interview/sessions/${sessionDbId}`, { headers: getAuthHeaders() });
+        if (!res.ok) return;
+        const data = await res.json();
+
+        interviewSessionId = data.session_token || null;
+        scores = data.messages.filter(m => m.score !== undefined).map(m => m.score);
+
+        openChatView(role, difficulty);
+        chatMessages.innerHTML = '';
+
+        data.messages.forEach(m => {
+            if (m.role === 'ai')       appendMsg('ai', m.content, null, true);
+            else if (m.role === 'user') appendMsg('user', m.content, null, true);
+            else if (m.role === 'feedback') appendMsg('feedback', m.content, m.score, true);
+        });
+
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+
+        if (scores.length > 0) {
+            const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
+            document.getElementById('chat-score-display').textContent = `Avg Score: ${avg.toFixed(1)}/10`;
+        }
+
+        if (activeSidebarItem) activeSidebarItem.classList.remove('active');
+        sidebarEl.classList.add('active');
+        activeSidebarItem = sidebarEl;
+    } catch (err) {
+        showToast('Failed to load session history', 'error');
+    }
+}
+
+// ── UI helpers ───────────────────────────────────────────────
+function openChatView(role, diff) {
+    emptyState.classList.add('hidden');
+    activeDiv.classList.remove('hidden');
+    chatMessages.innerHTML = '';
+    document.getElementById('chat-role-label').textContent = role;
+    document.getElementById('chat-diff-badge').textContent = `Difficulty ${diff}/10`;
+    document.getElementById('chat-score-display').textContent = '';
+}
+
+function appendMsg(role, content, score = null, noScroll = false) {
+    const wrap = document.createElement('div');
+    wrap.className = `msg ${role}`;
+
+    const senderMap = { ai: '<i class="fa-solid fa-robot"></i> Jobify AI', user: 'You', feedback: '<i class="fa-solid fa-check-circle"></i> AI Analysis' };
+    wrap.innerHTML = `
+        <span class="msg-sender">${senderMap[role] || role}</span>
+        <div class="msg-bubble">${sanitize(content)}</div>
+        ${score !== null && role === 'feedback' ? `<span class="msg-score-pill"><i class="fa-solid fa-star"></i> ${score}/10</span>` : ''}`;
+
+    chatMessages.appendChild(wrap);
+    if (!noScroll) chatMessages.scrollTop = chatMessages.scrollHeight;
+    return wrap;
+}
+
+function appendTyping() {
+    const id = 'typing-' + Date.now();
+    const wrap = document.createElement('div');
+    wrap.className = 'msg ai';
+    wrap.id = id;
+    wrap.innerHTML = `
+        <span class="msg-sender"><i class="fa-solid fa-robot"></i> Jobify AI</span>
+        <div class="msg-bubble"><div class="typing-dots"><span></span><span></span><span></span></div></div>`;
+    chatMessages.appendChild(wrap);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+    return id;
+}
+
+function removeTyping(id) { document.getElementById(id)?.remove(); }
+
+function setStartBtnLoading(loading) {
+    startBtn.disabled = loading;
+    startBtn.innerHTML = loading
+        ? '<i class="fa-solid fa-spinner fa-spin"></i> Starting...'
+        : '<i class="fa-solid fa-play"></i> Start Interview';
+}
+
+// Load sessions list whenever interview tab is clicked
+document.querySelector('[data-pane="pane-interview"]')?.addEventListener('click', loadSessionsList, { once: false });
+
+
 
 // ─── Tab navigation ───────────────────────────────────────────────────────────
 document.querySelectorAll('.tab').forEach(tab => {

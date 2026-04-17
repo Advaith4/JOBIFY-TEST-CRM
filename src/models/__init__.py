@@ -38,3 +38,20 @@ class JobApplication(SQLModel, table=True):
     status: str = Field(default="Bookmarked", max_length=50)
     tailored_resume_bullets: Optional[str] = None  # JSON array stored as text
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class InterviewSession(SQLModel, table=True):
+    """Persisted mock interview session with full chat history."""
+    __tablename__ = "interview_sessions"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="users.id", index=True)
+    session_token: str = Field(index=True, unique=True)   # UUID hex — links to in-memory state
+    role: str = Field(max_length=100)
+    difficulty: int = Field(default=5)
+    messages: str = Field(default="[]")  # JSON: [{role, content, score?, timestamp}]
+    avg_score: Optional[float] = None
+    status: str = Field(default="active", max_length=20)  # active | completed
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+

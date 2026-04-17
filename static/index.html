@@ -189,38 +189,62 @@
                 <div id="tracker-container" class="stack-layout"></div>
             </div>
 
-            <div id="pane-interview" class="pane hidden fade-in">
-                <div class="pane-hero">
-                    <h2>Mock Interview Studio</h2>
-                    <p>Dynamic AI feedback driven by CrewAI reasoning models.</p>
-                </div>
-                <div class="studio-container mt-4">
-                    <div id="studio-setup" class="glass-card padding-xl">
-                        <h3>Start a New Interview</h3>
-                        <div class="modern-input-group mt-3">
+            <div id="pane-interview" class="pane hidden interview-pane-fullscreen">
+
+                <!-- LEFT SIDEBAR -->
+                <aside class="chat-sidebar" id="chat-sidebar">
+                    <div class="chat-sidebar-header">
+                        <span><i class="fa-solid fa-robot"></i> Mock Interview</span>
+                        <button id="new-interview-btn" class="new-chat-btn" title="New Session"><i class="fa-solid fa-plus"></i></button>
+                    </div>
+                    <div id="sidebar-setup" class="sidebar-setup">
+                        <div class="sidebar-field">
                             <label>Target Role</label>
-                            <input type="text" id="interview-role" placeholder="e.g. Senior Frontend Engineer">
+                            <input type="text" id="interview-role" placeholder="e.g. Frontend Engineer">
                         </div>
-                        <div class="modern-input-group mt-3">
-                            <label>Difficulty (1-10)</label>
-                            <input type="number" id="interview-diff" placeholder="5" min="1" max="10">
+                        <div class="sidebar-field">
+                            <label>Difficulty &mdash; <span id="diff-label">5</span>/10</label>
+                            <input type="range" id="interview-diff" min="1" max="10" value="5" class="diff-slider">
                         </div>
-                        <button id="start-interview-btn" class="btn-modern-primary mt-4 w-full">Start AI Interview</button>
+                        <button id="start-interview-btn" class="btn-modern-primary w-full">
+                            <i class="fa-solid fa-play"></i> Start Interview
+                        </button>
                     </div>
-                    <div id="studio-active" class="glass-card padding-xl hidden">
-                        <div class="chat-area" id="interview-chat" style="max-height: 400px; overflow-y: auto; padding-right: 10px; margin-bottom: 20px;">
-                            <!-- chat bubbles go here -->
+                    <div class="sidebar-section-label">Past Sessions</div>
+                    <div id="sessions-list" class="sessions-list">
+                        <p class="sidebar-empty">No sessions yet.</p>
+                    </div>
+                </aside>
+
+                <!-- MAIN CHAT PANEL -->
+                <div class="chat-main" id="chat-main">
+                    <div id="chat-empty-state" class="chat-empty-state">
+                        <div class="chat-empty-icon"><i class="fa-solid fa-microphone-lines"></i></div>
+                        <h3>Ready to practise?</h3>
+                        <p>Set a role and difficulty on the left, then hit <strong>Start Interview</strong>.</p>
+                    </div>
+                    <div id="studio-active" class="chat-body hidden">
+                        <div class="chat-header-bar">
+                            <div>
+                                <span id="chat-role-label" class="chat-role-label"></span>
+                                <span id="chat-diff-badge" class="chat-diff-badge"></span>
+                            </div>
+                            <span id="chat-score-display" class="chat-score"></span>
                         </div>
-                        <div class="chat-input-area mt-4">
-                            <textarea id="interview-answer-input" placeholder="Type your answer here..."></textarea>
-                            <button id="submit-answer-btn" class="btn-modern-primary mt-3 w-full">Submit Answer & Get Feedback</button>
+                        <div class="chat-messages" id="interview-chat"></div>
+                        <div class="chat-input-bar">
+                            <textarea id="interview-answer-input" placeholder="Type your answer..." rows="1"></textarea>
+                            <button id="submit-answer-btn" class="send-btn" title="Send Answer">
+                                <i class="fa-solid fa-paper-plane"></i>
+                            </button>
                         </div>
                     </div>
                 </div>
+
             </div>
         </section>
     </main>
 
-    <script src="script.js?v=4"></script>
+    <script src="script.js?v=7"></script>
 </body>
 </html>
