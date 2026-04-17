@@ -2,15 +2,20 @@ import os
 import logging
 import shutil
 import uuid
+import json
 from pathlib import Path
+from contextlib import asynccontextmanager
 
 import appdirs
-from fastapi import FastAPI, UploadFile, File, Form, Body
+from fastapi import FastAPI, UploadFile, File, Form, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from sqlmodel import Session, select
 
+from database import create_db_and_tables, get_session
+from models import User, Resume, JobApplication
 
 def _prepare_crewai_storage() -> None:
     os.environ.setdefault("CREWAI_STORAGE_DIR", "jobify_local")
@@ -32,7 +37,9 @@ from crew import (
     run_resume_analyzer,
     run_resume_rewriter,
     run_interview_start,
-    run_interview_answer
+    run_interview_answer,
+    run_tailored_resume_rewriter,
+    run_job_crew
 )
 
 interview_sessions = {}
@@ -46,11 +53,24 @@ class InterviewAnswerReq(BaseModel):
     session_id: str
     answer: str
 
+class LoginReq(BaseModel):
+    username: str
+
+class TrackJobReq(BaseModel):
+    user_id: int
+    company_name: str
+    job_title: str
+    description_url: str = ""
+
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Jobify API")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    create_db_and_tables()
+    yield
 
-# Setup CORS
+app = FastAPI(title="Jobify AI CRM", lifespan=lifespan)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -58,20 +78,41 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Routes will be evaluated in order
 
-@app.post("/api/analyze")
-async def analyze_resume(
+@app.post("/api/auth/login")
+def login(req: LoginReq, session: Session = Depends(get_session)):
+    if not session:
+        return JSONResponse(status_code=500, content={"error": "Database not configured"})
+    user = session.exec(select(User).where(User.username == req.username)).first()
+    if not user:
+        user = User(username=req.username)
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+    
+    # Check if they have a saved resume
+    resume = session.exec(select(Resume).where(Resume.user_id == user.id)).first()
+    has_resume = resume is not None
+    
+    return {"user_id": user.id, "username": user.username, "has_resume": has_resume}
+
+
+@app.post("/api/resume/upload/{user_id}")
+async def upload_resume(
+    user_id: int,
     file: UploadFile = File(...),
-    location: str = Form(default="India"),
-    job_type: str = Form(default="Full-time"),
-    work_mode: str = Form(default="Any"),
-    experience: str = Form(default="Entry-level")
+    session: Session = Depends(get_session)
 ):
+    if not session:
+        return JSONResponse(status_code=500, content={"error": "Database not configured"})
+        
+    user = session.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+        
     if not file.filename.lower().endswith(".pdf"):
         return JSONResponse(status_code=400, content={"error": "Only PDF files are supported."})
 
-    # Use UUID to avoid filename collisions in concurrent uploads
     if not os.path.exists("data"):
         os.makedirs("data")
 
@@ -80,84 +121,91 @@ async def analyze_resume(
         shutil.copyfileobj(file.file, buffer)
         
     try:
-        # 1. Extract text from PDF
         resume_content = extract_text_from_pdf(temp_path)
-        
         if not resume_content or len(resume_content) < 50:
-            return JSONResponse(status_code=400, content={"error": "Could not extract sufficient text from the PDF. Make sure it is text-based."})
+            return JSONResponse(status_code=400, content={"error": "PDF extraction failed."})
             
-        # 2. Run the AI Pipeline
-        prefs = {
-            "location": location,
-            "job_type": job_type,
-            "work_mode": work_mode,
-            "experience": experience
-        }
-        results = analyze_resume_pipeline(resume_content, prefs)
+        # Save to DB
+        resume = session.exec(select(Resume).where(Resume.user_id == user.id)).first()
+        if resume:
+            resume.raw_text = resume_content
+        else:
+            resume = Resume(user_id=user.id, raw_text=resume_content)
+            session.add(resume)
+        session.commit()
         
-        return JSONResponse(content=results)
-        
+        return {"message": "Resume safely stored in CRM!"}
     except Exception as e:
-        import traceback
-        err_msg = traceback.format_exc()
-        print("API ERROR CAUGHT:", err_msg)
-        return JSONResponse(status_code=500, content={"error": f"{str(e)} | Details: {err_msg}"})
+        return JSONResponse(status_code=500, content={"error": str(e)})
     finally:
-        # Clean up the temp file
         if os.path.exists(temp_path):
-            try:
-                os.remove(temp_path)
-            except:
-                pass
+            os.remove(temp_path)
 
-# ── New Endpoints (Resume Copilot & Interview Coach) ─────────────────────────
-
-@app.post("/resume/analyze")
-async def resume_analyzer_endpoint(
-    file: UploadFile = File(...),
-    target_role: str = Form(default="")
-):
-    if not file.filename.lower().endswith(".pdf"):
-        return JSONResponse(status_code=400, content={"error": "Only PDF files are supported."})
-
-    if not os.path.exists("data"): os.makedirs("data")
-    temp_path = f"data/eval_{uuid.uuid4().hex}.pdf"
+@app.get("/api/jobs/feed/{user_id}")
+def daily_feed(user_id: int, session: Session = Depends(get_session)):
+    if not session:
+        return JSONResponse(status_code=500, content={"error": "Database not configured"})
+        
+    user = session.get(User, user_id)
+    resume = session.exec(select(Resume).where(Resume.user_id == user_id)).first()
     
+    if not resume:
+        return JSONResponse(status_code=400, content={"error": "Please upload a resume first."})
+
+    prefs = {
+        "location": user.location,
+        "experience": user.experience,
+        "job_type": "Full-time",
+        "work_mode": "Any"
+    }
+    
+    # We directly use the job_crew function independently for the feed!
     try:
-        with open(temp_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-        resume_content = extract_text_from_pdf(temp_path)
-        if not resume_content or len(resume_content) < 50:
-            return JSONResponse(status_code=400, content={"error": "Empty or bad PDF"})
-            
-        results = run_resume_analyzer(resume_content, target_role)
-        return JSONResponse(content=results)
+        jobs_data = run_job_crew(resume.raw_text, prefs)
+        return jobs_data
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
-    finally:
-        if os.path.exists(temp_path): os.remove(temp_path)
 
-@app.post("/resume/rewrite")
-async def resume_rewrite_endpoint(file: UploadFile = File(...)):
-    if not file.filename.lower().endswith(".pdf"):
-        return JSONResponse(status_code=400, content={"error": "Only PDFs."})
 
-    if not os.path.exists("data"): os.makedirs("data")
-    temp_path = f"data/rewrite_{uuid.uuid4().hex}.pdf"
+@app.post("/api/applications/track")
+def track_and_tailor(req: TrackJobReq, session: Session = Depends(get_session)):
+    if not session:
+        return JSONResponse(status_code=500, content={"error": "Database not configured"})
+        
+    resume = session.exec(select(Resume).where(Resume.user_id == req.user_id)).first()
+    if not resume:
+        return JSONResponse(status_code=400, content={"error": "No resume on file."})
+        
+    app = JobApplication(
+        user_id=req.user_id,
+        company_name=req.company_name,
+        job_title=req.job_title,
+        job_description_url=req.description_url,
+        status="Tailoring..."
+    )
+    session.add(app)
+    session.commit()
+    session.refresh(app)
     
-    try:
-        with open(temp_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-        resume_content = extract_text_from_pdf(temp_path)
-        if not resume_content or len(resume_content) < 50:
-            return JSONResponse(status_code=400, content={"error": "Empty or bad PDF"})
-            
-        results = run_resume_rewriter(resume_content)
-        return JSONResponse(content=results)
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
-    finally:
-        if os.path.exists(temp_path): os.remove(temp_path)
+    # Fire off AI tailored rewriter
+    # In a prod env this would be a background task, but we will run it inline for simplicity
+    jd_context = f"{req.job_title} at {req.company_name}. Link: {req.description_url}"
+    tailored_result = run_tailored_resume_rewriter(resume.raw_text, jd_context)
+    
+    app.tailored_resume_bullets = json.dumps(tailored_result.get("rewritten_lines", []))
+    app.status = "Draft Ready"
+    session.add(app)
+    session.commit()
+    
+    return {"message": "Job tracked and resume tailored!", "application": app.model_dump()}
+
+@app.get("/api/applications/{user_id}")
+def get_applications(user_id: int, session: Session = Depends(get_session)):
+    if not session:
+        return []
+    apps = session.exec(select(JobApplication).where(JobApplication.user_id == user_id).order_by(JobApplication.created_at.desc())).all()
+    return [app.model_dump() for app in apps]
+
 
 @app.post("/interview/start")
 async def interview_start(req: InterviewStartReq):
@@ -195,16 +243,12 @@ async def interview_answer(req: InterviewAnswerReq):
             current_diff=session["difficulty"]
         )
         
-        # update session state dynamically!
         session["questions"].append(session["current_question"])
         session["answers"].append(req.answer)
         
         eval_score = results.get("evaluation", {}).get("score", 5)
         session["scores"].append(eval_score)
-
         new_diff = results.get("new_difficulty", session["difficulty"])
-        
-        # Force bounds on difficulty safely parsing as int
         try:
             new_diff = int(new_diff)
         except (ValueError, TypeError):
@@ -216,6 +260,7 @@ async def interview_answer(req: InterviewAnswerReq):
         return results
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
+
 
 # Mount the static directory for the Frontend (MUST BE LAST)
 if not os.path.exists("static"):

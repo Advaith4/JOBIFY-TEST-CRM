@@ -379,3 +379,26 @@ def run_interview_answer(role: str, question: str, answer: str, current_diff: in
         "next_question": f_json.get("question", "Can you explain specifically how you handled that?"),
         "new_difficulty": d_json.get("new_difficulty", current_diff)
     }
+
+def run_tailored_resume_rewriter(resume_content: str, job_description: str) -> dict:
+    agent = create_resume_rewriter()
+    
+    # We create a custom task on the fly to tailor specifically to the JD
+    from crewai import Task
+    description = (
+        "You are an expert ATS resume optimizer. You must rewrite the candidate's resume bullet points "
+        f"to perfectly align with this specific Job Description:\n\n{job_description}\n\n"
+        f"Candidate Resume:\n{resume_content}\n\n"
+        "Return valid JSON containing 'rewritten_lines' array."
+    )
+    
+    task = Task(
+        description=description,
+        expected_output="Valid JSON with 'rewritten_lines' containing strings of tailored bullets.",
+        agent=agent
+    )
+    
+    crew = Crew(agents=[agent], tasks=[task], verbose=False)
+    result = crew.kickoff()
+    raw = getattr(result, "raw", str(result)).strip()
+    return extract_json(raw) or {"rewritten_lines": []}
