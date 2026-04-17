@@ -11,13 +11,15 @@ Jobify is an AI-powered career assistant that analyzes resumes, suggests real jo
 - Infers best-fit roles from a resume before retrieval.
 - Ranks only real fetched jobs to reduce hallucinated recommendations.
 
-### 2. Resume Optimization
-- Analyzes resume quality for ATS and recruiter friendliness.
-- Rewrites weak bullet points into stronger action-oriented content.
+### 2. Job Tracker & Resume Auto-Tailor
+- Track incoming job URLs into a personal SQLModel CRM database.
+- Uses CrewAI agents to completely rewrite your resume bullets specific to individual job descriptions on the fly.
+- Secure, token-based (UUID/DB) UI for managing pending application statuses.
 
-### 3. Interactive Interview Support
-- Generates realistic interview questions.
-- Evaluates answers and adapts question difficulty.
+### 3. Interactive Mock Interview Studio
+- Fully functional Vanilla JS + Glassmorphic UI chatbot interface.
+- Select target roles and difficulty (1-10) to initiate a dynamic AI examiner.
+- The AI evaluates answers logically in real-time, assigning a score and formulating targeted follow-up questions autonomously.
 
 ---
 
@@ -25,15 +27,20 @@ Jobify is an AI-powered career assistant that analyzes resumes, suggests real jo
 
 ### Backend
 - Python 3.10+
-- FastAPI / Uvicorn
-- CrewAI
-- Groq-powered existing Jobify agents
+- FastAPI & Uvicorn (REST endpoints)
+- SQLModel/SQLite (Lightweight relational CRM tracking)
+- CrewAI (LLM Orchestration)
+- Groq-powered endpoints for massive multi-agent throughput
+
+### Frontend
+- Premium Glassmorphic Split-Pane UI (Vanilla HTML/CSS/JS)
+- Real-time client-side navigation (Dashboard, Feed, Studio, Tracker)
+- Dynamic DOM insertion & cache busting mechanisms
 
 ### Utilities
 - pypdf
 - python-dotenv
 - requests
-- pydantic
 
 ---
 
