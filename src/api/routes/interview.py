@@ -54,14 +54,8 @@ def start_interview(
     db: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
-    try:
-        from crew import run_interview_start
-        result = run_interview_start(req.role, req.difficulty, req.weak_areas)
-    except Exception as exc:
-        logger.error("Interview start failed: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(exc))
-
-    question = result.get("question", "")
+    # Make it interactive from the beginning and instant (no LLM delay)
+    question = f"Hello! I'll be conducting your {req.role} mock interview today. Whenever you're ready, please formally introduce yourself or say 'Ready'."
     session_token = uuid.uuid4().hex
 
     # Persist to DB
@@ -201,3 +195,23 @@ def get_session_history(
         "messages": json.loads(rec.messages),
         "created_at": rec.created_at.isoformat(),
     }
+
+
+@router.delete("/sessions/{session_id}")
+def delete_session(
+    session_id: int,
+    db: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete a specific interview session."""
+    rec = db.get(InterviewSession, session_id)
+    if not rec or rec.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Session not found.")
+
+    # Remove from memory if active
+    if rec.session_token in _sessions:
+        del _sessions[rec.session_token]
+
+    db.delete(rec)
+    db.commit()
+    return {"message": "Session deleted"}

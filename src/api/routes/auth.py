@@ -57,8 +57,24 @@ def login(req: LoginReq, session: Session = Depends(get_session)):
         session.add(user)
         session.commit()
         session.refresh(user)
-    elif not verify_password(req.password, user.hashed_password):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect password")
+    else:
+        # Backward compatibility for legacy users created before password hashes
+        # were enforced, or records with malformed hashes.
+        stored_hash = (user.hashed_password or "").strip()
+        if not stored_hash:
+            user.hashed_password = hash_password(req.password)
+            session.add(user)
+            session.commit()
+            session.refresh(user)
+        else:
+            try:
+                if not verify_password(req.password, stored_hash):
+                    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect password")
+            except ValueError:
+                user.hashed_password = hash_password(req.password)
+                session.add(user)
+                session.commit()
+                session.refresh(user)
 
     from src.models import Resume
     from sqlmodel import select as sel

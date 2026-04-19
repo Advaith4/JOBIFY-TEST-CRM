@@ -308,7 +308,7 @@ body {
 @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
 /* Dashboard */
-.top-nav { display: flex; justify-content: space-between; align-items: center; padding: 1rem 2rem; position: sticky; top: 0; z-index: 100; border-bottom: 1px solid rgba(255,255,255,0.05); }
+.top-nav { display: flex; justify-content: space-between; align-items: center; padding: 1rem 2rem; position: sticky; top: 0; z-index: 200; border-bottom: 1px solid rgba(255,255,255,0.07); background: rgba(9,9,11,0.92); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); flex-shrink: 0; }
 .brand-icon.small { width: 32px; height: 32px; font-size: 1rem; border-radius: 8px; }
 .nav-links { display: flex; gap: 1rem; }
 .tab { background: none; border: none; color: var(--text-secondary); font-family: var(--font-head); font-weight: 600; font-size: 0.95rem; display: flex; align-items: center; gap: 0.5rem; cursor: pointer; padding: 0.5rem 1rem; border-radius: 8px; transition: all 0.2s; }
@@ -317,7 +317,13 @@ body {
 .user-badge { padding: 0.5rem 1rem; border-radius: 99px; display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; font-weight: 600; }
 .live-dot { width: 8px; height: 8px; background: var(--success); border-radius: 50%; box-shadow: 0 0 10px var(--success); }
 
-.dashboard-viewport { max-width: 1100px; margin: 0 auto; padding: 3rem 1.5rem; }
+/* Dashboard layout: full-height flex column so only the viewport scrolls, not the whole page */
+.dashboard-layout { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+.content-area { flex: 1; overflow: hidden; display: flex; flex-direction: column; min-height: 0; }
+.dashboard-viewport { flex: 1; overflow-y: auto; max-width: 1100px; margin: 0 auto; padding: 3rem 1.5rem; width: 100%; }
+
+/* The interview pane must break out of viewport max-width and padding */
+.interview-pane-wrapper { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
 .pane-hero { margin-bottom: 2.5rem; }
 .pane-hero h2 { font-family: var(--font-head); font-size: 2rem; margin-bottom: 0.5rem; }
 
@@ -342,6 +348,43 @@ body {
 .bullet-dot { color: var(--primary); font-size: 0.5rem; margin-top: 0.35rem; }
 .flex-center { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
 .padding-xl { padding: 4rem; }
+
+/* Resume Lab */
+.resume-lab-grid { display: grid; grid-template-columns: minmax(280px, 0.85fr) minmax(320px, 1.15fr); gap: 1.5rem; align-items: start; }
+.resume-lab-card { padding: 1.5rem; }
+.resume-lab-card h3 { font-family: var(--font-head); font-size: 1.35rem; margin-bottom: 0.6rem; }
+.muted-copy { color: var(--text-secondary); font-size: 0.92rem; line-height: 1.6; margin-bottom: 1.25rem; }
+.resume-role-row { display: grid; grid-template-columns: 1fr auto; gap: 0.75rem; margin-bottom: 1.25rem; }
+.resume-role-row input {
+    background: rgba(0,0,0,0.3);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    color: var(--text-primary);
+    font-family: var(--font-body);
+    padding: 0.95rem 1rem;
+    outline: none;
+}
+.resume-role-row input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(139,92,246,0.15); }
+.resume-score-empty { color: var(--text-muted); border: 1px dashed rgba(255,255,255,0.12); border-radius: 14px; padding: 1.25rem; text-align: center; }
+.resume-score-card { background: rgba(0,0,0,0.22); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 1.25rem; }
+.resume-score-top { display: flex; align-items: center; gap: 1rem; margin-bottom: 1.25rem; }
+.resume-score-ring {
+    width: 96px; height: 96px; border-radius: 50%;
+    display: grid; place-items: center;
+    background: conic-gradient(var(--success) var(--score-angle), rgba(255,255,255,0.08) 0);
+    position: relative; flex-shrink: 0;
+}
+.resume-score-ring::after { content: ""; position: absolute; inset: 9px; border-radius: 50%; background: var(--surface); }
+.resume-score-ring span { position: relative; z-index: 1; font-family: var(--font-head); font-weight: 800; font-size: 1.4rem; }
+.resume-score-title h4 { font-family: var(--font-head); font-size: 1.25rem; margin-bottom: 0.35rem; }
+.resume-score-title p { color: var(--text-secondary); font-size: 0.9rem; line-height: 1.5; }
+.resume-analysis-section { margin-top: 1rem; }
+.resume-analysis-section h5 { font-family: var(--font-head); color: var(--primary); margin-bottom: 0.5rem; }
+.resume-analysis-section ul { padding-left: 1.1rem; color: var(--text-secondary); line-height: 1.7; font-size: 0.9rem; }
+.resume-feedback-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 0.75rem; margin-top: 0.75rem; }
+.resume-feedback-box { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06); border-radius: 12px; padding: 0.85rem; }
+.resume-feedback-box strong { display: block; color: var(--text-primary); margin-bottom: 0.35rem; font-size: 0.82rem; text-transform: capitalize; }
+.resume-feedback-box span { color: var(--text-secondary); font-size: 0.85rem; line-height: 1.5; }
 
 .fade-in { animation: fadeIn 0.4s ease forwards; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
@@ -390,11 +433,12 @@ body {
    and fills the full remaining viewport height */
 .interview-pane-fullscreen {
     display: flex !important;
-    height: calc(100vh - 65px);   /* subtract nav height */
+    flex: 1;
     overflow: hidden;
     margin: 0 !important;
     max-width: none !important;
     padding: 0 !important;
+    min-height: 0;   /* required for flex children to shrink properly */
 }
 .interview-pane-fullscreen.hidden { display: none !important; }
 
@@ -503,12 +547,31 @@ body {
     cursor: pointer;
     transition: background 0.15s;
     margin-bottom: 2px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 0.5rem;
 }
 .session-item:hover { background: rgba(255,255,255,0.05); }
+.session-item:hover .session-delete { opacity: 1; }
 .session-item.active { background: rgba(139,92,246,0.12); border: 1px solid rgba(139,92,246,0.25); }
+.session-item-info { flex: 1; min-width: 0; }
 .session-role { font-size: 0.875rem; font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .session-meta { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.2rem; display: flex; gap: 0.5rem; }
 .session-score { color: var(--success); font-weight: 600; }
+.session-delete {
+    opacity: 0;
+    background: none;
+    border: none;
+    color: #ef4444;
+    cursor: pointer;
+    padding: 0.2rem 0.3rem;
+    border-radius: 5px;
+    font-size: 0.8rem;
+    flex-shrink: 0;
+    transition: opacity 0.15s, background 0.15s;
+}
+.session-delete:hover { background: rgba(239,68,68,0.15); }
 
 .sidebar-empty { color: var(--text-muted); font-size: 0.82rem; text-align: center; padding: 1.5rem 1rem; }
 
@@ -659,9 +722,12 @@ body {
 /* Responsive */
 @media (max-width: 700px) {
     .chat-sidebar { width: 220px; min-width: 200px; }
+    .resume-lab-grid { grid-template-columns: 1fr; }
+    .resume-role-row { grid-template-columns: 1fr; }
+    .nav-links { gap: 0.35rem; flex-wrap: wrap; justify-content: center; }
+    .tab { font-size: 0.82rem; padding: 0.45rem 0.65rem; }
 }
 @media (max-width: 500px) {
     .interview-pane-fullscreen { flex-direction: column; }
     .chat-sidebar { width: 100%; min-width: 0; height: auto; max-height: 220px; border-right: none; border-bottom: 1px solid rgba(255,255,255,0.06); }
 }
-

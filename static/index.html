@@ -162,6 +162,7 @@
             
             <div class="nav-links">
                 <button class="tab active" data-pane="pane-jobs"><i class="fa-solid fa-layer-group"></i> Feed</button>
+                <button class="tab" data-pane="pane-resume"><i class="fa-solid fa-file-lines"></i> Resume Lab</button>
                 <button class="tab" data-pane="pane-tracker"><i class="fa-solid fa-list-check"></i> Tracker</button>
                 <button class="tab" data-pane="pane-interview"><i class="fa-solid fa-microphone-lines"></i> Mock Interview</button>
             </div>
@@ -172,7 +173,8 @@
             </div>
         </nav>
 
-        <section class="dashboard-viewport">
+        <section class="content-area">
+            <div class="dashboard-viewport" id="scrollable-viewport">
             <div id="pane-jobs" class="pane active fade-in">
                 <div class="pane-hero">
                     <h2>Your Tailored Intel</h2>
@@ -181,13 +183,55 @@
                 <div id="jobs-container" class="grid-card-layout"></div>
             </div>
 
+            <div id="pane-resume" class="pane hidden fade-in">
+                <div class="pane-hero">
+                    <h2>Resume Lab</h2>
+                    <p>Replace your saved resume anytime, then score it for ATS clarity, impact, and role fit.</p>
+                </div>
+
+                <div class="resume-lab-grid">
+                    <section class="resume-lab-card glass-card">
+                        <div class="section-label"><i class="fa-solid fa-cloud-arrow-up"></i> Re-upload Resume</div>
+                        <h3>Update your stored PDF</h3>
+                        <p class="muted-copy">Upload your edited resume here. It replaces the previous resume used for job matching, scoring, and interview prep.</p>
+                        <input type="file" id="dashboard-resume-input" accept="application/pdf" hidden>
+                        <button class="btn-outline" id="choose-dashboard-resume-btn">
+                            <i class="fa-regular fa-file-pdf"></i> Choose PDF
+                        </button>
+                        <div id="dashboard-resume-file-info" class="file-chip hidden">
+                            <i class="fa-solid fa-circle-check"></i> <span id="dashboard-resume-file-name"></span>
+                        </div>
+                        <button class="btn btn-primary w-full mt-4" id="replace-resume-btn" disabled>
+                            <i class="fa-solid fa-rotate"></i> Replace Saved Resume
+                        </button>
+                    </section>
+
+                    <section class="resume-lab-card glass-card">
+                        <div class="section-label"><i class="fa-solid fa-chart-simple"></i> Resume Score</div>
+                        <h3>Score your current resume</h3>
+                        <p class="muted-copy">Optionally add a target role for more specific feedback.</p>
+                        <div class="resume-role-row">
+                            <input type="text" id="resume-target-role" placeholder="e.g. Junior Flutter Developer">
+                            <button class="btn-modern-primary" id="score-resume-btn">
+                                <i class="fa-solid fa-wand-magic-sparkles"></i> Score Resume
+                            </button>
+                        </div>
+                        <div id="resume-score-container" class="resume-score-empty">
+                            Your score and improvement plan will appear here.
+                        </div>
+                    </section>
+                </div>
+            </div>
+
             <div id="pane-tracker" class="pane hidden fade-in">
                 <div class="pane-hero">
                     <h2>Application Intelligence</h2>
                     <p>Access your dynamically modified ATS-friendly resume bullets here when you are ready to apply.</p>
                 </div>
                 <div id="tracker-container" class="stack-layout"></div>
-            </div>
+            </div><!-- /tracker pane -->
+
+            </div><!-- /dashboard-viewport -->
 
             <div id="pane-interview" class="pane hidden interview-pane-fullscreen">
 
@@ -242,9 +286,9 @@
                 </div>
 
             </div>
-        </section>
+        </section><!-- /content-area -->
     </main>
 
-    <script src="script.js?v=7"></script>
+    <script src="script.js?v=13"></script>
 </body>
 </html>

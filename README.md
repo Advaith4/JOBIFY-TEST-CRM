@@ -7,7 +7,7 @@ Jobify is an AI-powered career assistant that analyzes resumes, suggests real jo
 ## Key Features
 
 ### 1. Real-Time Job Search
-- Uses the JSearch API through RapidAPI to fetch live job postings.
+- Uses the Jooble API as the primary live jobs source, with JSearch as fallback.
 - Infers best-fit roles from a resume before retrieval.
 - Ranks only real fetched jobs to reduce hallucinated recommendations.
 
@@ -77,9 +77,14 @@ Create a `.env` file in the root directory:
 
 ```env
 GROQ_API_KEY=your_groq_api_key
+JOOBLE_API_KEY=your_jooble_api_key
+JOOBLE_API_BASE_URL=https://in.jooble.org/api/{api_key}
 RAPIDAPI_KEY=your_rapidapi_key
 MODEL_NAME=meta-llama/Llama-3.1-8B-Instruct
 ```
+
+`JOOBLE_API_KEY` is now the preferred jobs provider key. `RAPIDAPI_KEY` is optional and is only used as fallback for JSearch.
+`JOOBLE_API_BASE_URL` defaults to the India Jooble endpoint shown above.
 
 ### 5. Run the Main App
 ```bash

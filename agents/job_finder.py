@@ -8,7 +8,7 @@ load_dotenv()
 def create_job_finder():
     """
     Job Finder agent.
-    The real job search is done externally via DuckDuckGo (utils/job_search.py)
+    The real job search is done externally via job APIs (utils/job_search.py)
     before this agent runs. The agent's role is purely to:
       Phase 1 — infer the best matching job roles from the resume.
       Phase 3 — format pre-fetched real search results into clean JSON.

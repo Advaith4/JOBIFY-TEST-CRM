@@ -1,4 +1,5 @@
 import os
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
@@ -8,6 +9,7 @@ class Settings(BaseSettings):
 
     # --- AI Keys ---
     GROQ_API_KEY: str = ""
+    JOOBLE_API_KEY: str = ""
     RAPIDAPI_KEY: str = ""
     MODEL_NAME: str = "llama-3.1-8b-instant"
 
@@ -25,5 +27,20 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         extra = "allow"
+
+    @field_validator("DEBUG", mode="before")
+    @classmethod
+    def parse_debug(cls, value):
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            return False
+
+        normalized = str(value).strip().lower()
+        if normalized in {"1", "true", "yes", "on", "debug", "development", "dev"}:
+            return True
+        if normalized in {"0", "false", "no", "off", "release", "prod", "production"}:
+            return False
+        return False
 
 settings = Settings()

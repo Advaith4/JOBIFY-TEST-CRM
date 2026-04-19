@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     
     # External APIs
     GROQ_API_KEY: str = os.getenv("GROQ_API_KEY", "")
+    JOOBLE_API_KEY: str = os.getenv("JOOBLE_API_KEY", "")
     RAPIDAPI_KEY: str = os.getenv("RAPIDAPI_KEY", "")
     HF_TOKEN: str = os.getenv("HF_TOKEN", "")
     MODEL_NAME: str = os.getenv("MODEL_NAME", "meta-llama/Llama-3.1-8B-Instruct")

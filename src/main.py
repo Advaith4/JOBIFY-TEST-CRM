@@ -18,6 +18,33 @@ from pathlib import Path
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
 
+
+def _disable_broken_local_proxies() -> None:
+    """
+    Some Windows setups inject dead proxy vars like 127.0.0.1:9, which break
+    outbound HTTP for Groq, Jooble, RapidAPI, and related SDKs. Clear only
+    those known-bad values and leave legitimate proxy configs untouched.
+    """
+    proxy_vars = (
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "all_proxy",
+        "GIT_HTTP_PROXY",
+        "GIT_HTTPS_PROXY",
+    )
+    bad_markers = ("127.0.0.1:9", "localhost:9")
+
+    for var in proxy_vars:
+        value = os.getenv(var, "")
+        if value and any(marker in value for marker in bad_markers):
+            os.environ.pop(var, None)
+
+
+_disable_broken_local_proxies()
+
 import appdirs
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware

@@ -8,6 +8,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
 from src.database.connection import get_session
@@ -18,6 +19,10 @@ router = APIRouter(prefix="/api/resume", tags=["resume"])
 
 ALLOWED_CONTENT_TYPES = {"application/pdf"}
 MAX_FILE_SIZE_MB = 5
+
+
+class ResumeAnalyzeReq(BaseModel):
+    target_role: str = Field(default="", max_length=120)
 
 
 @router.post("/upload")
@@ -63,3 +68,28 @@ async def upload_resume(
     finally:
         if os.path.exists(temp_path):
             os.remove(temp_path)
+
+
+@router.post("/analyze")
+def analyze_resume(
+    req: ResumeAnalyzeReq,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    resume = session.exec(select(Resume).where(Resume.user_id == current_user.id)).first()
+    if not resume:
+        raise HTTPException(status_code=400, detail="Please upload a resume first.")
+
+    try:
+        from crew import run_resume_analyzer
+
+        result = run_resume_analyzer(resume.raw_text, req.target_role.strip())
+        return {
+            "success": True,
+            "score": result.get("score", 0),
+            "issues": result.get("issues", []),
+            "improvements": result.get("improvements", []),
+            "section_feedback": result.get("section_feedback", {}),
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Resume analyzer failed: {exc}")

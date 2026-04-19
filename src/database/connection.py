@@ -1,3 +1,5 @@
+import os
+
 from sqlmodel import SQLModel, create_engine, Session
 from src.config import settings
 
@@ -12,7 +14,9 @@ engine = create_engine(_db_url, echo=settings.DEBUG, connect_args=_connect_args)
 
 
 def create_db_and_tables() -> None:
-    SQLModel.metadata.create_all(engine)
+    auto_create = os.getenv("AUTO_CREATE_DB_SCHEMA", "").strip().lower() in {"1", "true", "yes", "on"}
+    if _db_url.startswith("sqlite") or auto_create:
+        SQLModel.metadata.create_all(engine)
 
 
 def get_session():

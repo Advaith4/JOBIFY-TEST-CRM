@@ -213,7 +213,7 @@ def run_job_crew(resume_content: str, prefs: dict = None) -> dict:
             "suggested_roles": roles,
             "jobs": [],
             "message": "No relevant jobs found",
-            "_warning": "Could not fetch live job data. Check RAPIDAPI_KEY and connectivity.",
+            "_warning": "Could not fetch live job data. Check JOOBLE_API_KEY or RAPIDAPI_KEY and connectivity.",
         }
 
     # ── Phase 2.5: Pre-scoring (Rule-based logic to select top 10) ──────────
