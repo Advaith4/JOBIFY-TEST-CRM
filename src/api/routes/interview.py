@@ -16,8 +16,9 @@ from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
 from src.database.connection import get_session
-from src.models import InterviewSession, User
+from src.models import CareerCoachMemory, InterviewSession, Resume, User
 from src.api.dependencies import get_current_user
+from src.resume_lab import analyze_resume, dumps_json, load_json_field, parse_resume
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/interview", tags=["interview"])
@@ -25,16 +26,127 @@ router = APIRouter(prefix="/api/interview", tags=["interview"])
 # In-memory state for active sessions (fast access during live interview)
 _sessions: dict[str, dict[str, Any]] = {}
 
+TRAINING_MODES = {
+    "adaptive": "Mix weak-area drilling with general role coverage.",
+    "weak_area_only": "Spend every question on recurring weaknesses and low-scoring resume areas.",
+    "domain_specific": "Prioritize domain and technical depth for the target role.",
+    "behavioral_only": "Use behavioral, communication, ownership, and story-structure questions only.",
+}
+
+INTERVIEWER_PERSONAS = {
+    "balanced": {
+        "label": "Balanced Coach",
+        "tone": "professional, realistic, direct but supportive",
+        "pressure": "medium",
+        "behavior": "Ask crisp questions, press once for specificity, then coach through gaps.",
+    },
+    "senior_engineer": {
+        "label": "Senior Engineer",
+        "tone": "technical, precise, skeptical of vague claims",
+        "pressure": "medium-high",
+        "behavior": "Challenge tradeoffs, architecture choices, debugging depth, and implementation details.",
+    },
+    "pressure_panel": {
+        "label": "Pressure Panel",
+        "tone": "fast-paced, interruptive, high standards",
+        "pressure": "high",
+        "behavior": "Use short interruptions, ask for concise answers, and push on weak assumptions.",
+    },
+    "friendly_coach": {
+        "label": "Friendly Coach",
+        "tone": "warm, encouraging, still rigorous",
+        "pressure": "low-medium",
+        "behavior": "Normalize mistakes, ask guided follow-ups, and turn gaps into practice tasks.",
+    },
+    "behavioral_lead": {
+        "label": "Behavioral Lead",
+        "tone": "people-focused, evidence-driven",
+        "pressure": "medium",
+        "behavior": "Probe ownership, conflict, collaboration, ambiguity, and STAR-quality storytelling.",
+    },
+}
+
 
 class StartReq(BaseModel):
     role: str = Field(min_length=1, max_length=100)
     difficulty: int = Field(default=5, ge=1, le=10)
     weak_areas: list[str] = Field(default_factory=list)
+    training_mode: str = Field(default="adaptive", max_length=40)
+    interviewer_persona: str = Field(default="balanced", max_length=40)
+    domain_focus: str = Field(default="", max_length=120)
+
+
+class StartFromResumeReq(BaseModel):
+    role: str = Field(default="", max_length=100)
+    difficulty: int = Field(default=5, ge=1, le=10)
+    force_reanalyze: bool = False
+    training_mode: str = Field(default="adaptive", max_length=40)
+    interviewer_persona: str = Field(default="balanced", max_length=40)
+    domain_focus: str = Field(default="", max_length=120)
 
 
 class AnswerReq(BaseModel):
     session_id: str
     answer: str = Field(min_length=1, max_length=5000)
+
+
+def _safe_json_load(value: str | None, default):
+    try:
+        return json.loads(value) if value else default
+    except (TypeError, json.JSONDecodeError):
+        return default
+
+
+def _normalize_training_mode(value: str | None) -> str:
+    normalized = str(value or "adaptive").strip().lower().replace("-", "_").replace(" ", "_")
+    return normalized if normalized in TRAINING_MODES else "adaptive"
+
+
+def _normalize_persona(value: str | None) -> str:
+    normalized = str(value or "balanced").strip().lower().replace("-", "_").replace(" ", "_")
+    return normalized if normalized in INTERVIEWER_PERSONAS else "balanced"
+
+
+def _question_mix_for_mode(training_mode: str) -> dict[str, float]:
+    if training_mode == "weak_area_only":
+        return {"weak_area": 1.0, "general": 0.0, "domain": 0.0, "behavioral": 0.0}
+    if training_mode == "domain_specific":
+        return {"weak_area": 0.3, "general": 0.0, "domain": 0.7, "behavioral": 0.0}
+    if training_mode == "behavioral_only":
+        return {"weak_area": 0.0, "general": 0.0, "domain": 0.0, "behavioral": 1.0}
+    return {"weak_area": 0.6, "general": 0.4, "domain": 0.0, "behavioral": 0.0}
+
+
+def _get_or_create_memory(db: Session, user_id: int) -> CareerCoachMemory:
+    memory = db.exec(select(CareerCoachMemory).where(CareerCoachMemory.user_id == user_id)).first()
+    if memory:
+        return memory
+    now = datetime.utcnow()
+    memory = CareerCoachMemory(user_id=user_id, created_at=now, updated_at=now)
+    db.add(memory)
+    db.commit()
+    db.refresh(memory)
+    return memory
+
+
+def _memory_snapshot(memory: CareerCoachMemory | None) -> dict[str, Any]:
+    if not memory:
+        return {
+            "recurring_weak_areas": [],
+            "score_trend": [],
+            "session_history": [],
+            "session_count": 0,
+            "avg_answer_score": None,
+        }
+    return {
+        "recurring_weak_areas": _safe_json_load(memory.recurring_weak_areas, [])[:8],
+        "score_trend": _safe_json_load(memory.score_trend, [])[-12:],
+        "session_history": _safe_json_load(memory.session_history, [])[-6:],
+        "session_count": memory.session_count,
+        "avg_answer_score": memory.avg_answer_score,
+        "preferred_persona": memory.preferred_persona,
+        "preferred_training_mode": memory.preferred_training_mode,
+    }
 
 
 def _save_messages(db: Session, session_token: str, messages: list, avg_score: float | None = None):
@@ -48,24 +160,368 @@ def _save_messages(db: Session, session_token: str, messages: list, avg_score: f
         db.commit()
 
 
+def _save_session_state(db: Session, session_token: str, state: dict[str, Any], avg_score: float | None = None) -> None:
+    """Persist live adaptive interview state to DB."""
+    rec = db.exec(select(InterviewSession).where(InterviewSession.session_token == session_token)).first()
+    if not rec:
+        return
+    rec.messages = json.dumps(state.get("messages", []))
+    rec.avg_score = avg_score
+    rec.difficulty = int(state.get("difficulty", rec.difficulty))
+    rec.training_mode = _normalize_training_mode(state.get("training_mode", rec.training_mode))
+    rec.interviewer_persona = _normalize_persona(state.get("interviewer_persona", rec.interviewer_persona))
+    rec.personalization_context = json.dumps(state.get("personalization_context", {}))
+    rec.updated_at = datetime.utcnow()
+    db.add(rec)
+    db.commit()
+
+
+def _unique_strings(items: list[str], limit: int = 8) -> list[str]:
+    seen: set[str] = set()
+    output: list[str] = []
+    for item in items:
+        cleaned = " ".join(str(item).strip().split())
+        key = cleaned.lower()
+        if cleaned and key not in seen:
+            seen.add(key)
+            output.append(cleaned)
+        if len(output) >= limit:
+            break
+    return output
+
+
+def _recurring_area_label(area: str) -> str:
+    text = " ".join(str(area or "").split())
+    if ":" in text:
+        return text.split(":", 1)[0].strip()
+    if " section " in text.lower():
+        return text.split(" section ", 1)[0].strip().title()
+    return text[:120] or "General interview depth"
+
+
+def _upsert_weak_area_counts(existing: list[dict[str, Any]], areas: list[str]) -> list[dict[str, Any]]:
+    now = datetime.utcnow().isoformat()
+    by_area = {str(item.get("area", "")).lower(): dict(item) for item in existing if item.get("area")}
+    for area in areas:
+        label = _recurring_area_label(area)
+        key = label.lower()
+        item = by_area.get(key, {"area": label, "count": 0, "last_seen": now})
+        item["count"] = int(item.get("count", 0) or 0) + 1
+        item["last_seen"] = now
+        by_area[key] = item
+    return sorted(by_area.values(), key=lambda item: (-int(item.get("count", 0) or 0), item.get("area", "")))[:12]
+
+
+def _update_coach_memory(
+    db: Session,
+    user_id: int,
+    state: dict[str, Any],
+    score: int | None = None,
+) -> CareerCoachMemory:
+    memory = _get_or_create_memory(db, user_id)
+    context = state.get("personalization_context") or {}
+    weak_areas = context.get("weak_areas", [])
+    focus_area = context.get("current_focus_area")
+    if focus_area:
+        weak_areas = [*weak_areas, focus_area]
+
+    recurring = _upsert_weak_area_counts(_safe_json_load(memory.recurring_weak_areas, []), weak_areas)
+    trend = _safe_json_load(memory.score_trend, [])
+    if score is not None:
+        trend.append({
+            "date": datetime.utcnow().isoformat(),
+            "score": score,
+            "difficulty": state.get("difficulty"),
+            "focus_area": focus_area,
+            "training_mode": context.get("training_mode", state.get("training_mode", "adaptive")),
+            "persona": context.get("interviewer_persona", state.get("interviewer_persona", "balanced")),
+        })
+    trend = trend[-60:]
+
+    session_history = _safe_json_load(memory.session_history, [])
+    summary = {
+        "session_token": state.get("session_token"),
+        "date": datetime.utcnow().isoformat(),
+        "role": state.get("role"),
+        "difficulty": state.get("difficulty"),
+        "training_mode": context.get("training_mode", state.get("training_mode", "adaptive")),
+        "persona": context.get("interviewer_persona", state.get("interviewer_persona", "balanced")),
+        "answers": len(state.get("answers", [])),
+        "latest_score": score,
+        "focus_area": focus_area,
+    }
+    if not session_history or session_history[-1].get("session_token") != summary["session_token"]:
+        session_history.append(summary)
+    else:
+        session_history[-1].update(summary)
+    session_history = session_history[-30:]
+
+    scored = [int(item["score"]) for item in trend if isinstance(item.get("score"), int)]
+    memory.recurring_weak_areas = json.dumps(recurring)
+    memory.score_trend = json.dumps(trend)
+    memory.session_history = json.dumps(session_history)
+    memory.session_count = len({item.get("session_token") for item in session_history if item.get("session_token")})
+    memory.avg_answer_score = round(sum(scored) / len(scored), 2) if scored else memory.avg_answer_score
+    memory.preferred_persona = context.get("interviewer_persona", memory.preferred_persona)
+    memory.preferred_training_mode = context.get("training_mode", memory.preferred_training_mode)
+    memory.updated_at = datetime.utcnow()
+    db.add(memory)
+    db.commit()
+    db.refresh(memory)
+    return memory
+
+
+def _derive_section_scores(analysis: dict[str, Any]) -> dict[str, int]:
+    explicit_scores = analysis.get("section_scores")
+    if isinstance(explicit_scores, dict) and explicit_scores:
+        scores: dict[str, int] = {}
+        for key, value in explicit_scores.items():
+            try:
+                numeric = int(value or 0)
+            except (TypeError, ValueError):
+                numeric = 0
+            scores[str(key).lower()] = max(0, min(100, numeric))
+        return scores
+
+    breakdown = analysis.get("breakdown") or {}
+    base = int(sum(int(breakdown.get(key, 60) or 60) for key in ("impact", "clarity", "structure", "ats")) / 4)
+    scores: dict[str, int] = {}
+    for section in analysis.get("sections", []):
+        name = str(section.get("section") or "resume").lower()
+        issue_count = len(section.get("issues") or [])
+        scores[name] = max(35, min(95, base - issue_count * 9))
+    return scores
+
+
+def _derive_weak_areas(analysis: dict[str, Any], section_scores: dict[str, int]) -> list[str]:
+    weak_areas: list[str] = []
+    low_sections = sorted(
+        ((name, score) for name, score in section_scores.items() if score < 72),
+        key=lambda item: item[1],
+    )
+    for name, score in low_sections:
+        weak_areas.append(f"{name.title()} section is low-scoring at {score}/100 and needs interview drilling.")
+
+    for section in analysis.get("sections", []):
+        section_name = str(section.get("section") or "resume").title()
+        for issue in (section.get("issues") or [])[:2]:
+            problem = issue.get("problem") or "Needs stronger evidence and specificity"
+            original = issue.get("original") or ""
+            weak_areas.append(f"{section_name}: {problem}. Resume line: {original[:160]}")
+
+    if not weak_areas and analysis.get("breakdown"):
+        weakest_metric = min(analysis["breakdown"].items(), key=lambda item: int(item[1] or 0))
+        weak_areas.append(f"{weakest_metric[0].title()} is the weakest resume dimension at {weakest_metric[1]}/100.")
+
+    return _unique_strings(weak_areas, limit=6)
+
+
+def _build_resume_context(resume_text: str, analysis: dict[str, Any], role: str) -> dict[str, Any]:
+    parsed = parse_resume(resume_text)
+    return {
+        "role": role,
+        "resume_score": analysis.get("score", 0),
+        "summary": parsed.get("summary", "")[:700],
+        "skills": (parsed.get("skills") or [])[:15],
+        "experience_samples": (parsed.get("experience") or [])[:5],
+        "project_samples": (parsed.get("projects") or [])[:4],
+    }
+
+
+def _build_personalization_context(
+    resume_text: str,
+    analysis: dict[str, Any],
+    role: str,
+    difficulty: int,
+    training_mode: str,
+    interviewer_persona: str,
+    domain_focus: str,
+    coach_memory: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    section_scores = _derive_section_scores(analysis)
+    weak_areas = _derive_weak_areas(analysis, section_scores)
+    training_mode = _normalize_training_mode(training_mode)
+    interviewer_persona = _normalize_persona(interviewer_persona)
+    return {
+        "source": "resume_lab",
+        "role": role,
+        "difficulty": difficulty,
+        "training_mode": training_mode,
+        "training_mode_description": TRAINING_MODES[training_mode],
+        "interviewer_persona": interviewer_persona,
+        "persona_profile": INTERVIEWER_PERSONAS[interviewer_persona],
+        "domain_focus": domain_focus,
+        "weak_areas": weak_areas,
+        "section_scores": section_scores,
+        "resume_context": _build_resume_context(resume_text, analysis, role),
+        "resume_score": analysis.get("score", 0),
+        "question_mix": _question_mix_for_mode(training_mode),
+        "focus_counts": {"weak_area": 0, "general": 0, "domain": 0, "behavioral": 0},
+        "coach_memory": coach_memory or {},
+    }
+
+
+def _normalize_focus_type(value: Any, fallback: str) -> str:
+    text = str(value or fallback or "").lower()
+    if "behavior" in text:
+        return "behavioral"
+    if "domain" in text or "technical" in text:
+        return "domain"
+    if "weak" in text or "simplify" in text:
+        return "weak_area"
+    return "general"
+
+
+def _choose_focus_mode(state: dict[str, Any]) -> str:
+    context = state.get("personalization_context") or {}
+    training_mode = _normalize_training_mode(context.get("training_mode", state.get("training_mode", "adaptive")))
+    if training_mode == "weak_area_only":
+        return "weak_area"
+    if training_mode == "domain_specific":
+        return "domain_specific"
+    if training_mode == "behavioral_only":
+        return "behavioral_only"
+    if not context.get("weak_areas"):
+        return "general"
+    counts = context.setdefault("focus_counts", {"weak_area": 0, "general": 0, "domain": 0, "behavioral": 0})
+    weak_count = int(counts.get("weak_area", 0) or 0)
+    general_count = int(counts.get("general", 0) or 0)
+    total = weak_count + general_count
+    if total == 0 or (weak_count / total) < 0.6:
+        return "weak_area"
+    return "general"
+
+
+def _state_from_record(rec: InterviewSession) -> dict[str, Any]:
+    context = _safe_json_load(rec.personalization_context, {})
+    msgs = _safe_json_load(rec.messages, [])
+    last_ai = next((m["content"] for m in reversed(msgs) if m.get("role") == "ai"), "")
+    return {
+        "role": rec.role,
+        "difficulty": rec.difficulty,
+        "weak_areas": context.get("weak_areas", []),
+        "questions": [],
+        "answers": [],
+        "scores": [],
+        "messages": msgs,
+        "current_question": last_ai,
+        "db_id": rec.id,
+        "session_token": rec.session_token,
+        "training_mode": rec.training_mode,
+        "interviewer_persona": rec.interviewer_persona,
+        "personalization_context": context,
+    }
+
+
+def _generate_daily_plan(memory: CareerCoachMemory, resume_analysis: dict[str, Any] | None = None) -> dict[str, Any]:
+    snapshot = _memory_snapshot(memory)
+    recurring = snapshot.get("recurring_weak_areas", [])
+    trend = snapshot.get("score_trend", [])
+    latest_score = trend[-1]["score"] if trend and isinstance(trend[-1].get("score"), int) else None
+    weakest_area = recurring[0]["area"] if recurring else "resume storytelling"
+
+    resume_score = resume_analysis.get("score") if resume_analysis else None
+    tasks = [
+        {
+            "title": f"10-minute weak-area drill: {weakest_area}",
+            "type": "interview_practice",
+            "duration_minutes": 10,
+            "why": "This is your most recurring interview gap across recent sessions.",
+        },
+        {
+            "title": "Rewrite one answer using STAR + metrics",
+            "type": "communication",
+            "duration_minutes": 12,
+            "why": "Structured stories make resume claims feel credible under pressure.",
+        },
+        {
+            "title": "Run one resume-aware mock interview",
+            "type": "mock_interview",
+            "duration_minutes": 15,
+            "why": "Short daily reps compound faster than occasional long practice.",
+        },
+    ]
+
+    if latest_score is not None and latest_score <= 4:
+        tasks.insert(0, {
+            "title": "Recovery drill: explain the missed concept from first principles",
+            "type": "foundation",
+            "duration_minutes": 8,
+            "why": "Your last answer struggled, so today starts with a simpler base layer.",
+        })
+    elif latest_score is not None and latest_score >= 8:
+        tasks.insert(0, {
+            "title": "Depth drill: add tradeoffs, constraints, and edge cases",
+            "type": "advanced_depth",
+            "duration_minutes": 10,
+            "why": "Your last answer was strong; the next gain is senior-level depth.",
+        })
+
+    if resume_score is not None and resume_score < 70:
+        tasks.append({
+            "title": "Apply one Resume Lab fix before interviewing",
+            "type": "resume_improvement",
+            "duration_minutes": 7,
+            "why": "A stronger resume gives the interviewer better evidence to probe.",
+        })
+
+    plan = {
+        "date": datetime.utcnow().date().isoformat(),
+        "headline": "Today, train the weakness that keeps repeating.",
+        "coach_note": f"Focus on {weakest_area}. Keep answers concise, specific, and evidence-backed.",
+        "target_score": min(10, max(6, int((latest_score or 5) + 1))),
+        "tasks": tasks[:4],
+        "based_on": {
+            "session_count": snapshot.get("session_count", 0),
+            "avg_answer_score": snapshot.get("avg_answer_score"),
+            "recurring_weak_areas": recurring[:5],
+        },
+    }
+    memory.daily_plan = json.dumps(plan)
+    memory.updated_at = datetime.utcnow()
+    return plan
+
+
 @router.post("/start")
 def start_interview(
     req: StartReq,
     db: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ):
+    training_mode = _normalize_training_mode(req.training_mode)
+    interviewer_persona = _normalize_persona(req.interviewer_persona)
+    memory = _get_or_create_memory(db, current_user.id)
     # Make it interactive from the beginning and instant (no LLM delay)
-    question = f"Hello! I'll be conducting your {req.role} mock interview today. Whenever you're ready, please formally introduce yourself or say 'Ready'."
+    persona_label = INTERVIEWER_PERSONAS[interviewer_persona]["label"]
+    question = f"Hello, I am your {persona_label} for this {req.role} mock interview. We will use {TRAINING_MODES[training_mode].lower()} Whenever you're ready, introduce yourself in 45 seconds."
     session_token = uuid.uuid4().hex
 
     # Persist to DB
     first_msg = {"role": "ai", "content": question, "timestamp": datetime.utcnow().isoformat()}
+    context = {
+        "source": "manual",
+        "role": req.role,
+        "weak_areas": req.weak_areas,
+        "section_scores": {},
+        "resume_context": {},
+        "question_mix": _question_mix_for_mode(training_mode),
+        "focus_counts": {"weak_area": 0, "general": 0, "domain": 0, "behavioral": 0},
+        "training_mode": training_mode,
+        "training_mode_description": TRAINING_MODES[training_mode],
+        "interviewer_persona": interviewer_persona,
+        "persona_profile": INTERVIEWER_PERSONAS[interviewer_persona],
+        "domain_focus": req.domain_focus,
+        "coach_memory": _memory_snapshot(memory),
+    }
     db_session = InterviewSession(
         user_id=current_user.id,
         session_token=session_token,
         role=req.role,
         difficulty=req.difficulty,
+        training_mode=training_mode,
+        interviewer_persona=interviewer_persona,
         messages=json.dumps([first_msg]),
+        personalization_context=json.dumps(context),
     )
     db.add(db_session)
     db.commit()
@@ -82,9 +538,151 @@ def start_interview(
         "messages": [first_msg],
         "current_question": question,
         "db_id": db_session.id,
+        "session_token": session_token,
+        "training_mode": training_mode,
+        "interviewer_persona": interviewer_persona,
+        "personalization_context": context,
     }
 
-    return {"session_id": session_token, "question": question, "db_id": db_session.id}
+    return {
+        "session_id": session_token,
+        "question": question,
+        "db_id": db_session.id,
+        "training_mode": training_mode,
+        "interviewer_persona": interviewer_persona,
+        "persona": INTERVIEWER_PERSONAS[interviewer_persona],
+        "coach_memory": context["coach_memory"],
+    }
+
+
+@router.post("/start-from-resume")
+def start_interview_from_resume(
+    req: StartFromResumeReq,
+    db: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    training_mode = _normalize_training_mode(req.training_mode)
+    interviewer_persona = _normalize_persona(req.interviewer_persona)
+    memory = _get_or_create_memory(db, current_user.id)
+    resume = db.exec(select(Resume).where(Resume.user_id == current_user.id)).first()
+    if not resume:
+        raise HTTPException(status_code=400, detail="Please upload a resume before starting a resume-aware interview.")
+
+    resume_text = resume.current_text or resume.raw_text or ""
+    if len(resume_text.strip()) < 50:
+        raise HTTPException(status_code=400, detail="Stored resume is too short for personalized interview training.")
+
+    role = req.role.strip() or current_user.target_role or "Software Engineer"
+    analysis = load_json_field(resume.last_analysis, None)
+    if req.force_reanalyze or not analysis:
+        analysis = analyze_resume(resume_text, role)
+        resume.last_analysis = dumps_json(analysis)
+        resume.parsed_resume = dumps_json(parse_resume(resume_text))
+        resume.updated_at = datetime.utcnow()
+        db.add(resume)
+        db.commit()
+
+    context = _build_personalization_context(
+        resume_text,
+        analysis,
+        role,
+        req.difficulty,
+        training_mode,
+        interviewer_persona,
+        req.domain_focus.strip(),
+        _memory_snapshot(memory),
+    )
+    focus_mode = "weak_area" if context["weak_areas"] else "general"
+    if training_mode == "behavioral_only":
+        focus_mode = "behavioral_only"
+    elif training_mode == "domain_specific":
+        focus_mode = "domain_specific"
+
+    try:
+        from crew import run_interview_start
+        first = run_interview_start(
+            role=role,
+            difficulty=req.difficulty,
+            weak_areas=context["weak_areas"],
+            resume_context=context["resume_context"],
+            section_scores=context["section_scores"],
+            focus_mode=focus_mode,
+            training_mode=training_mode,
+            interviewer_persona=INTERVIEWER_PERSONAS[interviewer_persona],
+            coach_memory=context["coach_memory"],
+            domain_focus=context["domain_focus"],
+        )
+    except Exception as exc:
+        logger.error("Resume-aware interview start failed: %s", exc, exc_info=True)
+        first = {
+            "question": f"Let's start with your resume. Which part of your {role} experience best proves you can handle this role, and where do you still need practice?",
+            "focus_area": context["weak_areas"][0] if context["weak_areas"] else "general resume walkthrough",
+            "focus_type": focus_mode,
+        }
+
+    question = str(first.get("question") or "Tell me about your most relevant project and what you would improve.").strip()
+    focus_type = _normalize_focus_type(first.get("focus_type"), focus_mode)
+    context["focus_counts"][focus_type] = context["focus_counts"].get(focus_type, 0) + 1
+    context["current_focus_area"] = first.get("focus_area", context["weak_areas"][0] if context["weak_areas"] else "general")
+
+    session_token = uuid.uuid4().hex
+    first_msg = {
+        "role": "ai",
+        "content": question,
+        "timestamp": datetime.utcnow().isoformat(),
+        "focus_area": context["current_focus_area"],
+        "focus_type": focus_type,
+        "source": "resume_lab",
+    }
+    db_session = InterviewSession(
+        user_id=current_user.id,
+        session_token=session_token,
+        role=role,
+        difficulty=req.difficulty,
+        training_mode=training_mode,
+        interviewer_persona=interviewer_persona,
+        messages=json.dumps([first_msg]),
+        personalization_context=json.dumps(context),
+    )
+    db.add(db_session)
+    db.commit()
+    db.refresh(db_session)
+
+    _sessions[session_token] = {
+        "role": role,
+        "difficulty": req.difficulty,
+        "weak_areas": context["weak_areas"],
+        "questions": [],
+        "answers": [],
+        "scores": [],
+        "messages": [first_msg],
+        "current_question": question,
+        "db_id": db_session.id,
+        "session_token": session_token,
+        "training_mode": training_mode,
+        "interviewer_persona": interviewer_persona,
+        "personalization_context": context,
+    }
+    _update_coach_memory(db, current_user.id, _sessions[session_token])
+
+    return {
+        "session_id": session_token,
+        "question": question,
+        "db_id": db_session.id,
+        "personalized": True,
+        "role": role,
+        "difficulty": req.difficulty,
+        "weak_areas": context["weak_areas"],
+        "section_scores": context["section_scores"],
+        "resume_score": context["resume_score"],
+        "focus_area": context["current_focus_area"],
+        "focus_type": focus_type,
+        "question_mix": context["question_mix"],
+        "training_mode": training_mode,
+        "interviewer_persona": interviewer_persona,
+        "persona": INTERVIEWER_PERSONAS[interviewer_persona],
+        "coach_memory": context["coach_memory"],
+    }
 
 
 @router.post("/answer")
@@ -99,15 +697,11 @@ def submit_answer(
         rec = db.exec(select(InterviewSession).where(InterviewSession.session_token == req.session_id)).first()
         if rec is None:
             raise HTTPException(status_code=400, detail="Invalid session ID. Please start a new interview.")
-        msgs = json.loads(rec.messages)
-        last_ai = next((m["content"] for m in reversed(msgs) if m["role"] == "ai"), "")
-        state = {
-            "role": rec.role, "difficulty": rec.difficulty, "weak_areas": [],
-            "questions": [], "answers": [], "scores": [], "messages": msgs,
-            "current_question": last_ai, "db_id": rec.id,
-        }
+        state = _state_from_record(rec)
         _sessions[req.session_id] = state
 
+    focus_mode = _choose_focus_mode(state)
+    context = state.get("personalization_context") or {}
     try:
         from crew import run_interview_answer
         result = run_interview_answer(
@@ -115,6 +709,17 @@ def submit_answer(
             question=state["current_question"],
             answer=req.answer,
             current_diff=state["difficulty"],
+            weak_areas=context.get("weak_areas", state.get("weak_areas", [])),
+            resume_context=context.get("resume_context", {}),
+            section_scores=context.get("section_scores", {}),
+            focus_mode=focus_mode,
+            training_mode=context.get("training_mode", state.get("training_mode", "adaptive")),
+            interviewer_persona=INTERVIEWER_PERSONAS.get(
+                context.get("interviewer_persona", state.get("interviewer_persona", "balanced")),
+                INTERVIEWER_PERSONAS["balanced"],
+            ),
+            coach_memory=context.get("coach_memory", {}),
+            domain_focus=context.get("domain_focus", ""),
         )
     except Exception as exc:
         logger.error("Interview answer failed: %s", exc, exc_info=True)
@@ -124,6 +729,10 @@ def submit_answer(
     state["questions"].append(state["current_question"])
     state["answers"].append(req.answer)
     score = result.get("evaluation", {}).get("score", 5)
+    try:
+        score = int(score)
+    except (TypeError, ValueError):
+        score = 5
     state["scores"].append(score)
 
     new_diff = result.get("new_difficulty", state["difficulty"])
@@ -132,22 +741,89 @@ def submit_answer(
     except (TypeError, ValueError):
         new_diff = state["difficulty"]
     state["difficulty"] = max(1, min(10, new_diff))
-    state["current_question"] = result.get("next_question", "")
+    state["current_question"] = result.get("next_question") or "Can you explain that with a specific example from your resume?"
+
+    focus_type = _normalize_focus_type(result.get("focus_type"), focus_mode)
+    context.setdefault("focus_counts", {"weak_area": 0, "general": 0, "domain": 0, "behavioral": 0})
+    context["focus_counts"][focus_type] = int(context["focus_counts"].get(focus_type, 0) or 0) + 1
+    context["current_focus_area"] = result.get("focus_area", context.get("current_focus_area", "general"))
+    context["difficulty"] = state["difficulty"]
+    context["last_score"] = score
+    context["last_adaptive_mode"] = result.get("adaptive_mode", focus_mode)
+    state["personalization_context"] = context
 
     now = datetime.utcnow().isoformat()
     state["messages"].append({"role": "user", "content": req.answer, "timestamp": now})
     state["messages"].append({
         "role": "ai",
-        "content": result.get("next_question", ""),
-        "feedback": result.get("evaluation", {}).get("improvements", ""),
+        "content": state["current_question"],
+        "feedback": result.get("evaluation", {}).get("improvements") or result.get("evaluation", {}).get("improvement", ""),
         "score": score,
+        "difficulty": state["difficulty"],
+        "focus_area": context["current_focus_area"],
+        "focus_type": focus_type,
+        "adaptive_mode": result.get("adaptive_mode", focus_mode),
         "timestamp": now,
     })
 
     avg = sum(state["scores"]) / len(state["scores"]) if state["scores"] else None
-    _save_messages(db, req.session_id, state["messages"], avg)
+    memory = _update_coach_memory(db, current_user.id, state, score)
+    context["coach_memory"] = _memory_snapshot(memory)
+    state["personalization_context"] = context
+    _save_session_state(db, req.session_id, state, avg)
 
-    return result
+    return {
+        **result,
+        "difficulty": state["difficulty"],
+        "focus_area": context["current_focus_area"],
+        "focus_type": focus_type,
+        "weak_areas": context.get("weak_areas", []),
+        "question_mix": context.get("question_mix", _question_mix_for_mode("adaptive")),
+        "training_mode": context.get("training_mode", state.get("training_mode", "adaptive")),
+        "interviewer_persona": context.get("interviewer_persona", state.get("interviewer_persona", "balanced")),
+        "persona": INTERVIEWER_PERSONAS.get(context.get("interviewer_persona", "balanced"), INTERVIEWER_PERSONAS["balanced"]),
+        "coach_memory": context["coach_memory"],
+    }
+
+
+@router.get("/coach-memory")
+def get_coach_memory(
+    db: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    memory = _get_or_create_memory(db, current_user.id)
+    return {
+        "success": True,
+        "memory": _memory_snapshot(memory),
+        "training_modes": TRAINING_MODES,
+        "personas": INTERVIEWER_PERSONAS,
+    }
+
+
+@router.get("/daily-plan")
+def get_daily_plan(
+    db: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    memory = _get_or_create_memory(db, current_user.id)
+    resume = db.exec(select(Resume).where(Resume.user_id == current_user.id)).first()
+    resume_analysis = load_json_field(resume.last_analysis, None) if resume else None
+    plan = _generate_daily_plan(memory, resume_analysis)
+    db.add(memory)
+    db.commit()
+    return {
+        "success": True,
+        "plan": plan,
+        "memory": _memory_snapshot(memory),
+    }
+
+
+@router.get("/modes")
+def get_interview_modes():
+    return {
+        "training_modes": TRAINING_MODES,
+        "personas": INTERVIEWER_PERSONAS,
+    }
 
 
 @router.get("/sessions")
@@ -167,9 +843,13 @@ def list_sessions(
             "session_token": r.session_token,
             "role": r.role,
             "difficulty": r.difficulty,
+            "training_mode": r.training_mode,
+            "interviewer_persona": r.interviewer_persona,
             "avg_score": r.avg_score,
             "status": r.status,
-            "message_count": len(json.loads(r.messages)),
+            "message_count": len(_safe_json_load(r.messages, [])),
+            "personalized": _safe_json_load(r.personalization_context, {}).get("source") == "resume_lab",
+            "weak_areas": _safe_json_load(r.personalization_context, {}).get("weak_areas", [])[:3],
             "created_at": r.created_at.isoformat(),
         }
         for r in records
@@ -190,9 +870,12 @@ def get_session_history(
         "id": rec.id,
         "role": rec.role,
         "difficulty": rec.difficulty,
+        "training_mode": rec.training_mode,
+        "interviewer_persona": rec.interviewer_persona,
         "avg_score": rec.avg_score,
         "status": rec.status,
-        "messages": json.loads(rec.messages),
+        "messages": _safe_json_load(rec.messages, []),
+        "personalization_context": _safe_json_load(rec.personalization_context, {}),
         "created_at": rec.created_at.isoformat(),
     }
 

@@ -17,13 +17,19 @@ class User(SQLModel, table=True):
 
 
 class Resume(SQLModel, table=True):
-    """Latest resume text for a user (one per user, upserted)."""
+    """Latest resume text and interactive Resume Lab state for a user."""
     __tablename__ = "resumes"
 
     id: Optional[int] = Field(default=None, primary_key=True)
     user_id: int = Field(foreign_key="users.id", index=True)
     raw_text: str
+    original_text: Optional[str] = None
+    current_text: Optional[str] = None
+    parsed_resume: Optional[str] = None
+    last_analysis: Optional[str] = None
+    applied_fixes: str = Field(default="[]")
     created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 class JobApplication(SQLModel, table=True):
@@ -49,9 +55,29 @@ class InterviewSession(SQLModel, table=True):
     session_token: str = Field(index=True, unique=True)   # UUID hex — links to in-memory state
     role: str = Field(max_length=100)
     difficulty: int = Field(default=5)
+    training_mode: str = Field(default="adaptive", max_length=40)
+    interviewer_persona: str = Field(default="balanced", max_length=40)
     messages: str = Field(default="[]")  # JSON: [{role, content, score?, timestamp}]
+    personalization_context: str = Field(default="{}")  # JSON: resume weaknesses, section scores, focus mix
     avg_score: Optional[float] = None
     status: str = Field(default="active", max_length=20)  # active | completed
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
+
+class CareerCoachMemory(SQLModel, table=True):
+    """Long-term coaching memory synthesized from resume analysis and interview sessions."""
+    __tablename__ = "career_coach_memory"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="users.id", index=True, unique=True)
+    recurring_weak_areas: str = Field(default="[]")  # JSON: [{area, count, last_seen}]
+    score_trend: str = Field(default="[]")  # JSON: recent answer scores and focus areas
+    session_history: str = Field(default="[]")  # JSON: compact session summaries
+    daily_plan: Optional[str] = None  # JSON: latest generated coaching plan
+    preferred_persona: str = Field(default="balanced", max_length=40)
+    preferred_training_mode: str = Field(default="adaptive", max_length=40)
+    session_count: int = Field(default=0)
+    avg_answer_score: Optional[float] = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)

@@ -26,8 +26,8 @@ OUTPUT FORMAT (STRICT JSON ONLY):
 def create_resume_analysis_task(agent, resume_content, target_role=""):
     role_ctx = f"Target Role: {target_role}\n" if target_role else "Target Role: General Software Engineering\n"
     description = """
-You are an expert Resume Analyzer and ATS Optimization Specialist.
-Analyze the following resume deeply.
+You are Jobify Resume Lab: a senior technical recruiter, ATS specialist, and resume coach.
+Analyze the resume deeply and return ONLY strict JSON.
 
 ---------------------
 {role_ctx}
@@ -35,28 +35,53 @@ RESUME:
 {resume}
 ---------------------
 
-Identify specific issues (e.g., weak verbs, lack of metrics, formatting errors).
-Provide overall improvements and a qualitative score.
-Provide feedback on specific sections: skills, experience, and projects.
+CRITICAL RULES:
+- Every issue MUST map to exact real text copied from the resume in the "original" field.
+- Every issue MUST include a directly improved replacement in the "improved" field.
+- Do not provide generic suggestions.
+- Do not invent fake employers, fake metrics, fake tools, or fake achievements.
+- If a metric is missing, improve action/clarity/scope without fabricating a number.
+- Prefer high-value issues from summary, experience, projects, and skills.
+- Return at most 8 total issues.
+- action_type must be "replace".
 
 Return ONLY JSON. Do not include any extra text.
 
 OUTPUT FORMAT (STRICT JSON ONLY):
 {{
-  "score": 75,
-  "issues": ["Weak verb in experience", "No metrics in projects"],
-  "improvements": ["Use strong action verbs", "Quantify bullet points"],
-  "section_feedback": {{
-    "skills": "feedback here",
-    "experience": "feedback here",
-    "projects": "feedback here"
+  "score": 82,
+  "breakdown": {{
+    "impact": 60,
+    "clarity": 75,
+    "structure": 85,
+    "ats": 80
+  }},
+  "sections": [
+    {{
+      "section": "experience",
+      "issues": [
+        {{
+          "original": "Worked on chatbot project",
+          "problem": "Weak verb and no clear ownership or outcome",
+          "improved": "Developed a chatbot project, clarifying ownership, tools used, and project outcome.",
+          "action_type": "replace",
+          "severity": "high",
+          "category": "impact"
+        }}
+      ]
+    }}
+  ],
+  "summary_feedback": {{
+    "strengths": ["specific strength"],
+    "weaknesses": ["specific weakness"],
+    "priority_fixes": ["specific next fix"]
   }}
 }}
 """.format(role_ctx=role_ctx, resume=resume_content)
 
     return Task(
         description=description,
-        expected_output="Valid JSON containing resume score, issues, improvements, and section feedback.",
+        expected_output="Valid JSON matching Jobify Resume Lab schema with grounded issues and replacements.",
         agent=agent
     )
 

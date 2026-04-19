@@ -14,6 +14,7 @@ Architecture:
 
 import logging
 import os
+import re
 
 import requests
 from dotenv import load_dotenv
@@ -24,6 +25,10 @@ logger = logging.getLogger(__name__)
 
 _JSEARCH_URL = "https://jsearch.p.rapidapi.com/search"
 _cache: dict[str, list[dict]] = {}
+_TITLE_NOISE_WORDS = {
+    "junior", "intern", "internship", "entry", "level", "fresher", "remote",
+    "full", "time", "contract", "opening", "hiring", "urgent",
+}
 
 
 def _jooble_url(api_key: str) -> str:
@@ -55,6 +60,13 @@ def _normalize_job(job: dict) -> dict:
         "location": (job.get("location") or "Remote").strip(),
         "description": (job.get("description") or "").strip()[:300],
     }
+
+
+def _normalize_title_family(title: str) -> str:
+    normalized = re.sub(r"[^a-z0-9\s/+&-]", " ", (title or "").lower())
+    tokens = [token for token in normalized.split() if token and token not in _TITLE_NOISE_WORDS]
+    family = " ".join(tokens[:6]).strip()
+    return family or normalized.strip()
 
 
 def _fetch_jobs_from_jooble(query: str, location: str = "", num_results: int = 10, page: int = 1) -> list[dict]:
@@ -235,12 +247,26 @@ def fetch_jobs_for_roles(roles: list[str], prefs: dict = None, jobs_per_role: in
     """
     seen_job_keys: set[tuple] = set()
     company_count: dict[str, int] = {}
+    title_family_count: dict[str, int] = {}
     all_jobs: list[dict] = []
 
     max_jobs_per_company = 2
+    max_jobs_per_title_family = 3
     target_total = max(len(roles) * jobs_per_role, 10)
 
+    deduped_roles: list[str] = []
+    seen_role_families: set[str] = set()
     for role in roles:
+        role_name = str(role or "").strip()
+        if not role_name:
+            continue
+        family = _normalize_title_family(role_name)
+        if family in seen_role_families:
+            continue
+        seen_role_families.add(family)
+        deduped_roles.append(role_name)
+
+    for role in deduped_roles:
         modifiers = []
         location = ""
         if prefs:
@@ -282,8 +308,15 @@ def fetch_jobs_for_roles(roles: list[str], prefs: dict = None, jobs_per_role: in
                     logger.debug("Skipping duplicate company: %s", company)
                     continue
 
+                title_family = _normalize_title_family(job["title"])
+                if title_family_count.get(title_family, 0) >= max_jobs_per_title_family:
+                    logger.debug("Skipping duplicate title family: %s", title_family)
+                    continue
+
                 seen_job_keys.add(key)
                 company_count[company] = company_count.get(company, 0) + 1
+                title_family_count[title_family] = title_family_count.get(title_family, 0) + 1
+                job["source_role"] = role
                 all_jobs.append(job)
 
     logger.info("Total unique jobs fetched (company-diverse): %d", len(all_jobs))

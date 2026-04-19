@@ -1,5 +1,6 @@
 import pypdf
-import re
+
+from src.resume_lab import clean_resume_text
 
 def extract_text_from_pdf(pdf_path):
     """
@@ -28,17 +29,7 @@ def clean_text(text):
     """
     Cleans extracted text for better LLM processing.
     """
-
-    # Remove extra spaces
-    text = re.sub(r"\s+", " ", text)
-
-    # Remove weird characters
-    text = re.sub(r"[^\x00-\x7F]+", " ", text)
-
-    # Normalize spacing
-    text = text.strip()
-
-    return text
+    return clean_resume_text(text)
 
 
 def preview_text(text, length=500):

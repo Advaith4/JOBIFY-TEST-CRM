@@ -92,6 +92,57 @@ def _is_valid_url(url: str) -> bool:
     return isinstance(url, str) and url.startswith("https://") and len(url) > 15
 
 
+_TITLE_NOISE_WORDS = {
+    "junior", "intern", "internship", "entry", "level", "fresher", "remote",
+    "full", "time", "contract", "opening", "hiring", "urgent",
+}
+
+
+def _normalize_title_family(title: str) -> str:
+    normalized = re.sub(r"[^a-z0-9\s/+&-]", " ", (title or "").lower())
+    tokens = [token for token in normalized.split() if token and token not in _TITLE_NOISE_WORDS]
+    family = " ".join(tokens[:6]).strip()
+    return family or normalized.strip()
+
+
+def _dedupe_roles(roles: list[str]) -> list[str]:
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for role in roles:
+        role_name = str(role or "").strip()
+        if not role_name:
+            continue
+        family = _normalize_title_family(role_name)
+        if family in seen:
+            continue
+        seen.add(family)
+        deduped.append(role_name)
+    return deduped
+
+
+def _select_diverse_jobs(jobs: list[dict], limit: int, max_per_title_family: int = 2) -> list[dict]:
+    selected: list[dict] = []
+    deferred: list[dict] = []
+    family_count: dict[str, int] = {}
+
+    for job in jobs:
+        family = _normalize_title_family(job.get("role") or job.get("title") or "")
+        if family_count.get(family, 0) >= max_per_title_family:
+            deferred.append(job)
+            continue
+        family_count[family] = family_count.get(family, 0) + 1
+        selected.append(job)
+        if len(selected) >= limit:
+            return selected
+
+    for job in deferred:
+        selected.append(job)
+        if len(selected) >= limit:
+            break
+
+    return selected
+
+
 def _validate_and_score_jobs(jobs: list[dict], all_real_jobs: list[dict]) -> list[dict]:
     """
     Post-process pipeline:
@@ -141,7 +192,7 @@ def _validate_and_score_jobs(jobs: list[dict], all_real_jobs: list[dict]) -> lis
 
     # Sort best-matching first
     verified.sort(key=lambda j: j["match_score"], reverse=True)
-    return verified
+    return _select_diverse_jobs(verified, limit=len(verified), max_per_title_family=2)
 
 
 def run_with_retries(func, *args):
@@ -188,7 +239,7 @@ def run_job_crew(resume_content: str, prefs: dict = None) -> dict:
     infer_data = extract_json(infer_raw)
 
     if infer_data and isinstance(infer_data.get("roles"), list) and infer_data["roles"]:
-        roles = [str(r) for r in infer_data["roles"] if r][:3]
+        roles = _dedupe_roles([str(r) for r in infer_data["roles"] if r])[:5]
     else:
         roles = [
             "Junior Software Developer",
@@ -231,7 +282,7 @@ def run_job_crew(resume_content: str, prefs: dict = None) -> dict:
         return score
 
     real_jobs = sorted(real_jobs, key=lambda j: score_job(j, skills_extracted), reverse=True)
-    real_jobs = real_jobs[:10]
+    real_jobs = _select_diverse_jobs(real_jobs, limit=10, max_per_title_family=2)
     logger.info("[%s] Pre-scored top 10 jobs selected.", run_id)
 
     # ── Phase 3: Hybrid RAG — LLM ranks ONLY real jobs ──────────────────────
@@ -252,7 +303,8 @@ def run_job_crew(resume_content: str, prefs: dict = None) -> dict:
 
     # Filter: keep ≥30% match, but always surface at least 3 results
     good = [j for j in verified_jobs if j["match_score"] >= 30]
-    final_jobs = (good if len(good) >= 3 else verified_jobs)[:5]
+    candidate_jobs = good if len(good) >= 3 else verified_jobs
+    final_jobs = _select_diverse_jobs(candidate_jobs, limit=5, max_per_title_family=2)
 
     logger.info("[%s] Final result: %d verified jobs returned.", run_id, len(final_jobs))
     logger.info("[%s] Jobs: %s", run_id,
@@ -333,16 +385,62 @@ def run_resume_rewriter(resume_content: str) -> dict:
     raw = getattr(result, "raw", str(result)).strip()
     return extract_json(raw) or {"rewritten_lines": []}
 
-def run_interview_start(role: str, difficulty: int, weak_areas: list = None) -> dict:
+def run_interview_start(
+    role: str,
+    difficulty: int,
+    weak_areas: list = None,
+    resume_context: dict | None = None,
+    section_scores: dict | None = None,
+    focus_mode: str = "weak_area",
+    training_mode: str = "adaptive",
+    interviewer_persona: dict | str | None = None,
+    coach_memory: dict | None = None,
+    domain_focus: str = "",
+) -> dict:
     if weak_areas is None: weak_areas = []
     agent = create_interviewer()
-    task = create_interview_start_task(agent, role, difficulty, weak_areas)
+    task = create_interview_start_task(
+        agent,
+        role,
+        difficulty,
+        weak_areas,
+        resume_context=resume_context or {},
+        section_scores=section_scores or {},
+        focus_mode=focus_mode,
+        training_mode=training_mode,
+        interviewer_persona=interviewer_persona or {},
+        coach_memory=coach_memory or {},
+        domain_focus=domain_focus,
+    )
     crew = Crew(agents=[agent], tasks=[task], verbose=False)
     result = crew.kickoff()
     raw = getattr(result, "raw", str(result)).strip()
-    return extract_json(raw) or {"question": "Could you tell me about yourself and your experience?"}
+    return extract_json(raw) or {
+        "question": "Could you tell me about yourself and your experience?",
+        "focus_area": "general introduction",
+        "focus_type": "general",
+        "interviewer_signal": "I will listen for specific evidence.",
+        "pressure_level": "medium",
+    }
 
-def run_interview_answer(role: str, question: str, answer: str, current_diff: int) -> dict:
+def run_interview_answer(
+    role: str,
+    question: str,
+    answer: str,
+    current_diff: int,
+    weak_areas: list | None = None,
+    resume_context: dict | None = None,
+    section_scores: dict | None = None,
+    focus_mode: str = "weak_area",
+    training_mode: str = "adaptive",
+    interviewer_persona: dict | str | None = None,
+    coach_memory: dict | None = None,
+    domain_focus: str = "",
+) -> dict:
+    weak_areas = weak_areas or []
+    resume_context = resume_context or {}
+    section_scores = section_scores or {}
+    coach_memory = coach_memory or {}
     # ── Multi-Agent Iterative Execution ──
     # 1. Evaluator reviews the answer -> yields score
     ag_eval = create_evaluator()
@@ -352,14 +450,43 @@ def run_interview_answer(role: str, question: str, answer: str, current_diff: in
     raw_eval = getattr(c_eval.kickoff(), "raw", "").strip()
     eval_json = extract_json(raw_eval) or {"score": 5, "strengths": ["Clear communication"], "weaknesses": ["Needs more depth"], "improvements": "Elaborate more."}
     score = eval_json.get("score", 5)
+    try:
+        numeric_score = int(score)
+    except (TypeError, ValueError):
+        numeric_score = 5
+
+    if numeric_score <= 4 and weak_areas:
+        adaptive_focus_mode = "simplify_weak_area"
+    elif numeric_score >= 8:
+        adaptive_focus_mode = "increase_depth"
+    else:
+        adaptive_focus_mode = focus_mode
     
     # 2. Run Follow-up generator and Difficulty controller in parallel
     def _run_followup():
         ag_f = create_followup_coach()
-        t_f = create_followup_task(ag_f, role, question, answer, current_diff)
+        t_f = create_followup_task(
+            ag_f,
+            role,
+            question,
+            answer,
+            current_diff,
+            weak_areas=weak_areas,
+            resume_context=resume_context,
+            section_scores=section_scores,
+            focus_mode=adaptive_focus_mode,
+            training_mode=training_mode,
+            interviewer_persona=interviewer_persona or {},
+            coach_memory=coach_memory,
+            domain_focus=domain_focus,
+        )
         c_f = Crew(agents=[ag_f], tasks=[t_f], verbose=False)
         raw_f = getattr(c_f.kickoff(), "raw", "").strip()
-        return extract_json(raw_f) or {"question": "Can you elaborate further?"}
+        return extract_json(raw_f) or {
+            "question": "Can you elaborate further?",
+            "focus_area": weak_areas[0] if weak_areas else "general depth",
+            "focus_type": "weak_area" if weak_areas else "general",
+        }
         
     def _run_diff():
         ag_d = create_difficulty_controller()
@@ -377,7 +504,12 @@ def run_interview_answer(role: str, question: str, answer: str, current_diff: in
     return {
         "evaluation": eval_json,
         "next_question": f_json.get("question", "Can you explain specifically how you handled that?"),
-        "new_difficulty": d_json.get("new_difficulty", current_diff)
+        "new_difficulty": d_json.get("new_difficulty", current_diff),
+        "focus_area": f_json.get("focus_area", weak_areas[0] if weak_areas else "general"),
+        "focus_type": f_json.get("focus_type", "weak_area" if "weak" in adaptive_focus_mode else "general"),
+        "adaptive_mode": adaptive_focus_mode,
+        "interviewer_signal": f_json.get("interviewer_signal", ""),
+        "pressure_level": f_json.get("pressure_level", "medium"),
     }
 
 def run_tailored_resume_rewriter(resume_content: str, job_description: str) -> dict:

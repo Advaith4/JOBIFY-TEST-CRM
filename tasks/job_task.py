@@ -39,6 +39,22 @@ def create_role_inference_task(agent, resume_content: str) -> Task:
         "NEVER suggest Data Scientist, ML Engineer, DB Developer, or UI/UX "
         "unless those are clearly the candidate's primary domain.\n\n"
 
+        "STEP 3 — ENSURE ROLE DIVERSITY INSIDE THE SAME DOMAIN:\n"
+        "The 5 roles must be DISTINCT adjacent targets, not the same title repeated "
+        "with tiny wording changes. Avoid outputs like 'Junior Python Developer', "
+        "'Python Developer Intern', and 'Python Developer Fresher' together unless "
+        "there are no other realistic adjacent roles. Prefer nearby but distinct "
+        "titles such as backend, API, software engineer, platform, web, mobile, "
+        "or cross-platform roles when they still fit the same stack.\n\n"
+
+        "Examples:\n"
+        "  • Backend/Python domain: Junior Python Developer, Backend Developer Intern, "
+        "API Developer Intern, Django/FastAPI Developer Intern, Software Engineer Intern\n"
+        "  • Web frontend domain: Junior Frontend Developer, React Developer Intern, "
+        "UI Engineer Intern, Web Developer Intern, JavaScript Developer Intern\n"
+        "  • Mobile domain: Junior Flutter Developer, Mobile App Developer Intern, "
+        "Cross-Platform Developer Intern, Android Developer Intern, React Native Developer Intern\n\n"
+
         "Return ONLY valid JSON (no extra text):\n"
         '{"roles": ["Role 1", "Role 2", "Role 3", "Role 4", "Role 5"]}\n\n'
 
@@ -46,6 +62,7 @@ def create_role_inference_task(agent, resume_content: str) -> Task:
         "- Entry-level, junior, or internship only\n"
         "- Be specific (e.g. 'Junior Flutter Developer', not just 'Developer')\n"
         "- All 5 roles within the same primary domain\n"
+        "- All 5 roles must be distinct base titles, not near-duplicates\n"
         "- No senior or lead positions\n"
         "- Valid JSON only, no markdown"
     )
@@ -104,6 +121,9 @@ def create_job_ranking_task(agent, resume_content: str, real_jobs: list[dict]) -
 
         "YOUR TASK:\n"
         "Select the TOP 5 most relevant jobs from the list above for this candidate.\n"
+        "Prefer TITLE DIVERSITY when match quality is similar. If two jobs are both strong "
+        "but essentially the same role title, keep the better one and use another strong "
+        "job with a different title family when available.\n"
         "For each selected job:\n"
         "  - Copy title, company, url, location EXACTLY as shown above.\n"
         "  - Write a 'reason' (1-2 sentences) explaining WHY this specific job "
