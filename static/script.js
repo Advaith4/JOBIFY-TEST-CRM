@@ -51,9 +51,9 @@ const jobsBestMatchNote = document.getElementById('jobs-best-match-note');
 
 const coachStreakCount = document.getElementById('coach-streak-count');
 const coachStreakCopy = document.getElementById('coach-streak-copy');
-const coachAvgScore = document.getElementById('coach-avg-score');
-const coachScoreCopy = document.getElementById('coach-score-copy');
-const coachScoreDelta = document.getElementById('coach-score-delta');
+const coachResumeScore = document.getElementById('coach-resume-score');
+const coachResumeScoreCopy = document.getElementById('coach-resume-score-copy');
+const coachResumeScoreDelta = document.getElementById('coach-resume-score-delta');
 const coachConfidenceScore = document.getElementById('coach-confidence-score');
 const coachConfidenceCopy = document.getElementById('coach-confidence-copy');
 const coachConfidenceDelta = document.getElementById('coach-confidence-delta');
@@ -77,6 +77,18 @@ const coachDailyGain = document.getElementById('coach-daily-gain');
 const coachReadyState = document.getElementById('coach-ready-state');
 const coachNextActionBtn = document.getElementById('coach-next-action-btn');
 const coachNextActionCopy = document.getElementById('coach-next-action-copy');
+const coachProgressToggle = document.getElementById('coach-progress-toggle');
+const coachAdvancedToggle = document.getElementById('coach-advanced-toggle');
+const coachProgressPanel = document.getElementById('coach-progress-panel');
+const coachAdvancedPanel = document.getElementById('coach-advanced-panel');
+const coachProgressArrow = document.getElementById('coach-progress-arrow');
+const coachAdvancedArrow = document.getElementById('coach-advanced-arrow');
+
+const resumeHealthBadge = document.getElementById('resume-health-badge');
+const resumeStrengthEl = document.getElementById('resume-strength');
+const resumeCriticalCountEl = document.getElementById('resume-critical-count');
+const resumeHealthBreakdown = document.getElementById('resume-health-breakdown');
+const resumeHealthHint = document.getElementById('resume-health-hint');
 
 const dashboardResumeInput = document.getElementById('dashboard-resume-input');
 const chooseDashboardResumeBtn = document.getElementById('choose-dashboard-resume-btn');
@@ -152,6 +164,174 @@ let coachState = {
     latestFeedback: null,
     ui: { lastAvgScore: null, lastConfidence: null },
 };
+const appUIState = {
+    currentView: 'dashboard',
+    panels: {
+        progress: false,
+        advanced: false,
+    },
+};
+
+function setPanelExpanded(panel, expanded) {
+    if (!panel) return;
+    panel.classList.toggle('is-collapsed', !expanded);
+}
+
+function updateCoachDisclosureUI() {
+    const progressOpen = !!appUIState.panels.progress;
+    const advancedOpen = !!appUIState.panels.advanced;
+    setPanelExpanded(coachProgressPanel, progressOpen);
+    setPanelExpanded(coachAdvancedPanel, advancedOpen);
+    if (coachProgressArrow) coachProgressArrow.textContent = progressOpen ? '▴' : '▾';
+    if (coachAdvancedArrow) coachAdvancedArrow.textContent = advancedOpen ? '▴' : '▾';
+}
+
+function setCurrentView(view) {
+    const safeView = ['dashboard', 'resume', 'interview'].includes(view) ? view : 'dashboard';
+    appUIState.currentView = safeView;
+    document.body.dataset.view = safeView;
+}
+
+function getResumeStrengthLabel(score) {
+    const value = Number(score);
+    if (!Number.isFinite(value)) return { label: '--', tone: 'moderate' };
+    if (value >= 80) return { label: 'Strong', tone: 'strong' };
+    if (value >= 65) return { label: 'Moderate', tone: 'moderate' };
+    return { label: 'Weak', tone: 'weak' };
+}
+
+function normalizeHealthStatus(level) {
+    if (level === 'pass' || level === 'ok') return 'pass';
+    if (level === 'fail' || level === 'error') return 'fail';
+    return 'warn';
+}
+
+function deriveHealthCategoryStatus(analysis, category) {
+    if (!analysis) {
+        return { level: 'warn', label: 'Needs analysis', count: 0 };
+    }
+
+    const breakdown = analysis.breakdown || {};
+    const score = clampScore(analysis.score);
+    const openIssues = countOpenIssues(analysis);
+
+    const metricScore = key => clampScore(breakdown?.[key] ?? 0);
+    const impact = metricScore('impact');
+    const clarity = metricScore('clarity');
+    const structure = metricScore('structure');
+    const ats = metricScore('ats');
+
+    const allIssues = getAllResumeIssues(analysis);
+    const matchIssue = issue => categorizeIssue(issue) === category;
+    const categoryOpen = allIssues.filter(issue => matchIssue(issue) && issue.status !== 'applied' && !getAppliedIssueIds().has(issue.id));
+
+    // Prefer metric score mapping when available; otherwise fall back to issue counts.
+    let base = null;
+    if (category === 'formatting') base = clarity || null;
+    if (category === 'metrics') base = impact || null;
+    if (category === 'keywords') base = ats || null;
+    if (category === 'structure') base = structure || null;
+
+    const count = categoryOpen.length;
+
+    if (base !== null) {
+        const level = base >= 78 ? 'pass' : base >= 62 ? 'warn' : 'fail';
+        const label = level === 'pass' ? 'Good' : level === 'warn' ? 'Improve' : 'Critical';
+        return { level, label, count };
+    }
+
+    // No breakdown data; infer from issues + overall score.
+    if (openIssues === 0 && score >= 75) return { level: 'pass', label: 'Good', count };
+    if (count === 0) return { level: 'pass', label: 'Good', count: 0 };
+    if (count <= 2) return { level: 'warn', label: 'Improve', count };
+    return { level: 'fail', label: 'Critical', count };
+}
+
+function categorizeIssue(issue) {
+    const problem = String(issue?.problem || '').toLowerCase();
+    const actionType = String(issue?.action_type || '').toLowerCase();
+    const combined = `${problem} ${actionType}`;
+
+    const has = (...needles) => needles.some(n => combined.includes(n));
+
+    if (has('keyword', 'ats', 'match', 'search', 'missing keyword', 'recruiter')) return 'keywords';
+    if (has('metric', 'quantif', 'number', 'impact', '%', 'measur')) return 'metrics';
+    if (has('format', 'spacing', 'typo', 'grammar', 'punct', 'readability')) return 'formatting';
+    if (has('structure', 'section', 'order', 'layout', 'flow', 'bullets')) return 'structure';
+    return 'structure';
+}
+
+function renderResumeHealthPanel(analysis) {
+    if (!resumeHealthBadge || !resumeStrengthEl || !resumeCriticalCountEl || !resumeHealthBreakdown) return;
+
+    if (!analysis) {
+        resumeHealthBadge.className = 'health-badge';
+        resumeHealthBadge.textContent = '--';
+        resumeStrengthEl.textContent = '--';
+        resumeCriticalCountEl.textContent = '--';
+        if (resumeHealthHint) resumeHealthHint.textContent = 'Run Resume Lab analysis to generate a diagnosis.';
+
+        resumeHealthBreakdown.querySelectorAll('.health-row').forEach(row => {
+            row.classList.remove('pass', 'warn', 'fail');
+            row.classList.add('warn');
+            row.querySelector('.health-icon').textContent = '⚠';
+            row.querySelector('.health-status').textContent = 'Needs analysis';
+        });
+        return;
+    }
+
+    const score = clampScore(analysis.score);
+    const strength = getResumeStrengthLabel(score);
+    const openIssues = countOpenIssues(analysis);
+    const criticalIssues = getAllResumeIssues(analysis).filter(issue => {
+        const status = String(issue?.status || '').toLowerCase();
+        const isApplied = getAppliedIssueIds().has(issue?.id) || status === 'applied';
+        if (isApplied) return false;
+        const problem = String(issue?.problem || '').toLowerCase();
+        return problem.includes('critical') || problem.includes('must') || problem.includes('severe');
+    });
+
+    resumeStrengthEl.textContent = strength.label;
+    resumeCriticalCountEl.textContent = String(criticalIssues.length || Math.min(openIssues, 6));
+
+    resumeHealthBadge.className = `health-badge ${strength.tone}`;
+    resumeHealthBadge.textContent = strength.label;
+    if (resumeHealthHint) {
+        resumeHealthHint.textContent = openIssues
+            ? 'Click an item to jump to the most relevant fix.'
+            : 'Looking good — keep polishing with one targeted fix.';
+    }
+
+    const categories = ['formatting', 'metrics', 'keywords', 'structure'];
+    const iconFor = level => (level === 'pass' ? '✓' : level === 'warn' ? '⚠' : '✕');
+    categories.forEach(cat => {
+        const row = resumeHealthBreakdown.querySelector(`[data-health-area="${cat}"]`);
+        if (!row) return;
+        const status = deriveHealthCategoryStatus(analysis, cat);
+        const level = normalizeHealthStatus(status.level);
+        row.classList.remove('pass', 'warn', 'fail');
+        row.classList.add(level);
+        row.querySelector('.health-icon').textContent = iconFor(level);
+        row.querySelector('.health-status').textContent = status.count ? `${status.label} · ${status.count}` : status.label;
+    });
+}
+
+async function openResumeLabAndFocusCategory(category) {
+    document.querySelector('[data-pane="pane-resume"]')?.click();
+    await loadResumeLab(false);
+
+    const analysis = resumeLabState.last_analysis;
+    if (!analysis) return;
+
+    const allIssues = getAllResumeIssues(analysis);
+    const firstMatch = allIssues.find(issue => categorizeIssue(issue) === category && issue.status !== 'applied' && !getAppliedIssueIds().has(issue.id));
+    if (firstMatch) {
+        focusEditorOnIssue(firstMatch);
+        resumeScoreContainer?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        return;
+    }
+    resumeScoreContainer?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+}
 let latestJobsFeed = [];
 let trackerPollTimer = null;
 let authRedirectInProgress = false;
@@ -2317,6 +2497,11 @@ function renderCoachDashboard() {
         ? Number(scoreTrend[scoreTrend.length - 2]?.score || latestScore)
         : Number(coachState.ui?.lastAvgScore ?? latestScore);
     const scoreDelta = scoreTrend.length > 1 ? latestScore - previousScore : 0;
+    const resumeScore = resumeAnalysis ? clampScore(resumeAnalysis.score) : 0;
+    const previousResumeScore = Number.isFinite(Number(coachState.ui?.lastResumeScore))
+        ? Number(coachState.ui.lastResumeScore)
+        : resumeScore;
+    const resumeScoreDelta = resumeAnalysis ? resumeScore - previousResumeScore : 0;
     const previousConfidence = Number.isFinite(Number(coachState.ui?.lastConfidence))
         ? Number(coachState.ui.lastConfidence)
         : confidence;
@@ -2343,11 +2528,11 @@ function renderCoachDashboard() {
     if (coachStreakCopy) coachStreakCopy.textContent = resumeStreakState.count > 1
         ? 'You are building a steady prep habit.'
         : 'Come back daily to keep the streak alive.';
-    if (coachAvgScore) coachAvgScore.textContent = memory.avg_answer_score ? `${Number(memory.avg_answer_score).toFixed(1)}/10` : '--';
-    if (coachScoreCopy) coachScoreCopy.textContent = memory.avg_answer_score
-        ? 'Based on your recent mock interview answers.'
-        : 'Complete an interview answer to start your score trend.';
-    setDeltaBadge(coachScoreDelta, scoreDelta, '', 1);
+    if (coachResumeScore) coachResumeScore.textContent = resumeAnalysis ? String(resumeScore) : '--';
+    if (coachResumeScoreCopy) coachResumeScoreCopy.textContent = resumeAnalysis
+        ? 'Latest score from Resume Lab.'
+        : 'Run Resume Lab to calculate your score.';
+    setDeltaBadge(coachResumeScoreDelta, resumeAnalysis ? resumeScoreDelta : 0, '');
     if (coachConfidenceScore) coachConfidenceScore.textContent = resumeAnalysis ? `${confidence}%` : '--';
     if (coachConfidenceCopy) coachConfidenceCopy.textContent = resumeAnalysis
         ? getConfidenceLabel(confidence)
@@ -2364,13 +2549,11 @@ function renderCoachDashboard() {
                     ? `Latest progress: ${dailySnapshot.lastEvent}. Keep going with one more focused step.`
                     : 'Your coach will turn today\'s resume and interview signals into a simple next step.';
     }
-    if (coachNextActionCopy) coachNextActionCopy.textContent = nextActionCopy;
+    // Guided UI: keep dashboard focused (no secondary next-action CTA duplication).
+    if (coachNextActionCopy) coachNextActionCopy.textContent = '';
     if (coachNextActionBtn) {
-        coachNextActionBtn.dataset.action = nextActionType;
-        coachNextActionBtn.dataset.issueId = nextIssue?.id || '';
-        coachNextActionBtn.innerHTML = nextActionType === 'resume_fix'
-            ? '<i class="fa-solid fa-wand-magic-sparkles"></i> Fix Resume'
-            : '<i class="fa-solid fa-microphone-lines"></i> Start Interview';
+        coachNextActionBtn.dataset.action = '';
+        coachNextActionBtn.dataset.issueId = '';
     }
 
     renderCoachControls(coachState.modes);
@@ -2378,10 +2561,12 @@ function renderCoachDashboard() {
     renderCoachWeakAreas(memory.recurring_weak_areas || []);
     renderCoachTrends(scoreTrend, confidence);
     renderCoachFeedback(coachState.latestFeedback);
+    renderResumeHealthPanel(resumeAnalysis);
     patchCoachState({
         ui: {
             lastAvgScore: Number.isFinite(latestScore) ? latestScore : coachState.ui?.lastAvgScore,
             lastConfidence: resumeAnalysis ? confidence : coachState.ui?.lastConfidence,
+            lastResumeScore: resumeAnalysis ? resumeScore : coachState.ui?.lastResumeScore,
         },
     });
 }
@@ -3279,16 +3464,22 @@ function renderResumePreview() {
                 `;
             }
 
+            const isSkills = label === 'Skills';
+            const maxItems = isSkills ? 24 : items.length;
+            const trimmedItems = items.slice(0, maxItems);
+            const overflowCount = Math.max(0, items.length - trimmedItems.length);
+
             return `
-                <section class="resume-paper-section">
+                <section class="resume-paper-section ${isSkills ? 'is-skills' : ''}">
                     <h4>${sanitize(label)}</h4>
                     <ul>
-                        ${items.map(item => {
+                        ${trimmedItems.map(item => {
                             const itemText = repairResumeDisplayText(String(item || ''));
                             const isApplied = !showingBefore && appliedSet.has(itemText);
                             const isFresh = !showingBefore && recentHighlightSet.has(itemText.trim());
                             return `<li>${isApplied ? `<span class="updated-line ${isFresh ? 'fresh-highlight' : ''}">${sanitize(itemText)}</span>` : sanitize(itemText)}</li>`;
                         }).join('')}
+                        ${overflowCount ? `<li class="resume-more">+${overflowCount} more</li>` : ''}
                     </ul>
                 </section>
             `;
@@ -3422,6 +3613,33 @@ document.addEventListener('keydown', event => {
 // Load sessions list whenever interview tab is clicked
 document.querySelector('[data-pane="pane-interview"]')?.addEventListener('click', loadSessionsList, { once: false });
 
+if (coachProgressToggle) {
+    coachProgressToggle.addEventListener('click', () => {
+        appUIState.panels.progress = !appUIState.panels.progress;
+        updateCoachDisclosureUI();
+    });
+}
+
+if (coachAdvancedToggle) {
+    coachAdvancedToggle.addEventListener('click', () => {
+        appUIState.panels.advanced = !appUIState.panels.advanced;
+        updateCoachDisclosureUI();
+    });
+}
+
+updateCoachDisclosureUI();
+setCurrentView('dashboard');
+
+if (resumeHealthBreakdown) {
+    resumeHealthBreakdown.addEventListener('click', event => {
+        const row = event.target.closest('[data-health-area]');
+        if (!row) return;
+        const area = row.dataset.healthArea;
+        if (!area) return;
+        openResumeLabAndFocusCategory(area);
+    });
+}
+
 
 
 // ─── Tab navigation ───────────────────────────────────────────────────────────
@@ -3441,6 +3659,13 @@ document.querySelectorAll('.tab').forEach(tab => {
             viewport.style.display = (paneId === 'pane-interview') ? 'none' : 'block';
         }
         document.body.classList.toggle('interview-live', paneId === 'pane-interview');
+        setCurrentView(
+            paneId === 'pane-resume'
+                ? 'resume'
+                : paneId === 'pane-interview'
+                    ? 'interview'
+                    : 'dashboard'
+        );
 
         if (paneId === 'pane-resume') {
             loadResumeLab(false);

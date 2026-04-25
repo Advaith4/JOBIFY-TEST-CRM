@@ -184,20 +184,69 @@
             <div id="pane-coach" class="pane active fade-in">
                 <div class="coach-shell">
                     <section class="coach-hero glass-card">
-                        <div class="coach-hero-copy">
-                            <div class="section-label"><i class="fa-solid fa-compass"></i> Career Coach</div>
-                            <h2>One place to improve your resume and interview skills.</h2>
-                            <p class="muted-copy">Use this page to see what to fix next, start practice rounds, and keep track of daily progress.</p>
+                        <div class="coach-hero-left">
+                            <div class="coach-hero-copy">
+                                <div class="section-label"><i class="fa-solid fa-compass"></i> Career Coach</div>
+                                <h2>One place to improve your resume and interview skills.</h2>
+                                <p class="muted-copy">Start practice when you’re ready. Fix the resume when your confidence dips.</p>
+                            </div>
+                            <div class="coach-hero-actions">
+                                <button class="btn-modern-primary coach-primary-cta" id="coach-start-interview-btn">
+                                    <i class="fa-solid fa-microphone-lines"></i> Start Practice
+                                </button>
+                                <button class="btn-outline coach-secondary-cta" id="coach-fix-resume-btn">
+                                    Fix Resume
+                                </button>
+                            </div>
                         </div>
-                        <div class="coach-hero-actions">
-                            <button class="btn-modern-primary" id="coach-start-interview-btn">
-                                <i class="fa-solid fa-microphone-lines"></i> Start Interview
-                            </button>
-                            <button class="btn-outline" id="coach-fix-resume-btn">
-                                <i class="fa-solid fa-wand-magic-sparkles"></i> Fix Resume
-                            </button>
-                        </div>
-                        <aside class="coach-hero-aside">
+
+                        <aside class="coach-hero-right glass-card">
+                            <div class="health-head">
+                                <div>
+                                    <div class="section-label"><i class="fa-solid fa-heart-pulse"></i> Resume Health Engine</div>
+                                    <h3 class="health-title">Diagnosis</h3>
+                                </div>
+                                <span class="health-badge" id="resume-health-badge">--</span>
+                            </div>
+
+                            <div class="health-metrics">
+                                <div class="health-metric">
+                                    <span>Strength</span>
+                                    <strong id="resume-strength">--</strong>
+                                </div>
+                                <div class="health-metric">
+                                    <span>Critical issues</span>
+                                    <strong id="resume-critical-count">--</strong>
+                                </div>
+                            </div>
+
+                            <div class="health-breakdown" id="resume-health-breakdown" role="list">
+                                <button type="button" class="health-row" data-health-area="formatting" role="listitem">
+                                    <span class="health-icon" aria-hidden="true"></span>
+                                    <span class="health-label">Formatting</span>
+                                    <span class="health-status"></span>
+                                </button>
+                                <button type="button" class="health-row" data-health-area="metrics" role="listitem">
+                                    <span class="health-icon" aria-hidden="true"></span>
+                                    <span class="health-label">Metrics</span>
+                                    <span class="health-status"></span>
+                                </button>
+                                <button type="button" class="health-row" data-health-area="keywords" role="listitem">
+                                    <span class="health-icon" aria-hidden="true"></span>
+                                    <span class="health-label">Keywords</span>
+                                    <span class="health-status"></span>
+                                </button>
+                                <button type="button" class="health-row" data-health-area="structure" role="listitem">
+                                    <span class="health-icon" aria-hidden="true"></span>
+                                    <span class="health-label">Structure</span>
+                                    <span class="health-status"></span>
+                                </button>
+                            </div>
+
+                            <p class="health-hint" id="resume-health-hint">Run Resume Lab analysis to generate a diagnosis.</p>
+                        </aside>
+
+                        <aside class="coach-hero-aside guided-hidden">
                             <div class="coach-live-progress">
                                 <span class="coach-live-label">Today's momentum</span>
                                 <strong id="coach-daily-gain">+0 today</strong>
@@ -213,33 +262,45 @@
                     <section class="coach-overview-grid">
                         <article class="coach-metric-card glass-card">
                             <span>Daily Streak</span>
-                            <strong><span id="coach-streak-count">0</span>d</strong>
+                            <div class="streak-value" aria-label="Daily streak">
+                                <span id="coach-streak-count" class="streak-number">0</span>
+                                <span class="streak-unit">day streak</span>
+                            </div>
                             <p id="coach-streak-copy">Open Resume Lab or complete a coach action to build momentum.</p>
                         </article>
-                        <article class="coach-metric-card glass-card">
-                            <span>Avg Interview Score</span>
+                        <article class="coach-metric-card glass-card" id="coach-resume-score-card">
+                            <span>Resume Score</span>
                             <div class="metric-value-row">
-                                <strong id="coach-avg-score">--</strong>
-                                <span id="coach-score-delta" class="coach-delta-badge neutral">+0.0</span>
+                                <strong id="coach-resume-score">--</strong>
+                                <span id="coach-resume-score-delta" class="coach-delta-badge neutral">+0</span>
                             </div>
-                            <p id="coach-score-copy">Answer history will appear after practice.</p>
+                            <p id="coach-resume-score-copy">Analyze your resume to unlock a score.</p>
                         </article>
                         <article class="coach-metric-card glass-card">
-                            <span>Resume Confidence</span>
+                            <span>Confidence</span>
                             <div class="metric-value-row">
                                 <strong id="coach-confidence-score">--</strong>
                                 <span id="coach-confidence-delta" class="coach-delta-badge neutral">+0%</span>
                             </div>
                             <p id="coach-confidence-copy">Run Resume Lab analysis to calculate readiness.</p>
                         </article>
-                        <article class="coach-metric-card glass-card">
+                        <article class="coach-metric-card glass-card guided-hidden">
                             <span>Sessions</span>
                             <strong id="coach-session-count">0</strong>
                             <p>Your practice history builds up here over time.</p>
                         </article>
                     </section>
 
-                    <section class="coach-main-grid">
+                    <div class="coach-disclosure-row">
+                        <button class="btn-outline coach-disclosure-btn" id="coach-progress-toggle" type="button">
+                            View Progress <span id="coach-progress-arrow">▾</span>
+                        </button>
+                        <button class="btn-outline coach-disclosure-btn" id="coach-advanced-toggle" type="button">
+                            <i class="fa-solid fa-gear"></i> Advanced Settings <span id="coach-advanced-arrow">▾</span>
+                        </button>
+                    </div>
+
+                    <section class="coach-main-grid guided-main-grid">
                         <article class="coach-plan-card glass-card">
                             <div class="coach-card-head">
                                 <div>
@@ -256,7 +317,7 @@
                             </div>
                         </article>
 
-                        <aside class="coach-control-card glass-card">
+                        <aside class="coach-control-card glass-card is-collapsed" id="coach-advanced-panel">
                             <div class="section-label"><i class="fa-solid fa-sliders"></i> Interview Settings</div>
                             <h3>Pick how you want to practice</h3>
                             <div class="coach-control-stack">
@@ -297,11 +358,11 @@
                         </aside>
                     </section>
 
-                    <section class="coach-insight-grid">
-                        <article class="coach-weak-card glass-card">
+                    <section class="coach-insight-grid guided-insight-grid">
+                        <article class="coach-weak-card glass-card guided-hidden">
                             <div class="section-label"><i class="fa-solid fa-crosshairs"></i> Weak Areas</div>
-                            <div id="coach-weak-areas" class="coach-chip-list">
-                                <p class="empty-state">No weak-area memory yet.</p>
+                            <div class="coach-chip-list">
+                                <p class="empty-state">Weak areas are shown in the hero summary.</p>
                             </div>
                             <div id="coach-weak-drill" class="coach-drill-hint">
                                 <strong>Next drill</strong>
@@ -309,14 +370,14 @@
                             </div>
                         </article>
 
-                        <article class="coach-trend-card glass-card">
+                        <article class="coach-trend-card glass-card is-collapsed" id="coach-progress-panel">
                             <div class="section-label"><i class="fa-solid fa-chart-line"></i> Progress</div>
                             <h3>How your practice is trending</h3>
                             <div id="coach-score-trend" class="coach-trend-bars"></div>
                             <div id="coach-confidence-trend" class="coach-confidence-trend"></div>
                         </article>
 
-                        <article class="coach-feedback-card glass-card">
+                        <article class="coach-feedback-card glass-card guided-hidden">
                             <div class="section-label"><i class="fa-solid fa-comments"></i> Latest Feedback</div>
                             <div id="coach-feedback-summary">
                                 <p class="empty-state">Complete an interview answer to see score reasoning and next improvements.</p>
