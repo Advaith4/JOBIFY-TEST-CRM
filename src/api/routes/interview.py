@@ -689,6 +689,9 @@ def start_interview(
             coach_memory=_memory_snapshot(memory),
             domain_focus=req.domain_focus,
         )
+        if not isinstance(first, dict):
+            logger.warning("run_interview_start returned non-dict payload; using fallback question.")
+            first = {}
     except Exception as exc:
         logger.error("Manual interview start failed: %s", exc, exc_info=True)
         first = {
@@ -845,6 +848,9 @@ def start_interview_from_resume(
             coach_memory=context["coach_memory"],
             domain_focus=context["domain_focus"],
         )
+        if not isinstance(first, dict):
+            logger.warning("run_interview_start returned non-dict payload for resume-aware start; using fallback.")
+            first = {}
     except Exception as exc:
         logger.error("Resume-aware interview start failed: %s", exc, exc_info=True)
         first = {
@@ -978,6 +984,9 @@ def submit_answer(
             conversation_history=state.get("messages", [])[-8:],
             current_focus_area=context.get("current_focus_area", ""),
         )
+        if not isinstance(result, dict):
+            logger.warning("run_interview_answer returned non-dict payload; using safe fallback.")
+            result = {}
     except Exception as exc:
         logger.error("Interview answer failed: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail=str(exc))

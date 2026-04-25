@@ -26,7 +26,7 @@ const loginInput   = document.getElementById('login-username');
 const loginPass    = document.getElementById('login-password');
 const pwdToggle    = document.getElementById('pwd-toggle');
 const emailCheck   = document.querySelector('.auth-check');
-const emailError   = document.getElementById('email-error');
+const usernameError = document.getElementById('username-error');
 const pwdStrength  = document.getElementById('pwd-strength');
 const strengthFill = document.querySelector('.strength-fill');
 const strengthText = document.querySelector('.strength-text');
@@ -35,6 +35,7 @@ const fileInput  = document.getElementById('file-input');
 const uploadBtn  = document.getElementById('upload-db-btn');
 const fileInfo   = document.getElementById('file-info');
 const fileNameSpan = document.getElementById('file-name');
+const dropZone = document.getElementById('drop-zone');
 let selectedFile = null;
 
 const displayUser      = document.getElementById('display-user');
@@ -151,6 +152,9 @@ let coachState = {
     latestFeedback: null,
     ui: { lastAvgScore: null, lastConfidence: null },
 };
+let latestJobsFeed = [];
+let trackerPollTimer = null;
+let authRedirectInProgress = false;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function switchPage(pageId) {
@@ -187,6 +191,16 @@ function showToast(message, type = 'success') {
 function getErrorMessage(data, fallback) {
     if (!data || typeof data !== 'object') return fallback;
     return data.detail || data.error || data.message || fallback;
+}
+
+function handleAuthExpired() {
+    if (authRedirectInProgress) return;
+    authRedirectInProgress = true;
+    authToken = null;
+    localStorage.removeItem('jobify_token');
+    showToast('Session expired. Please sign in again.', 'error');
+    switchPage('page-login');
+    setTimeout(() => { authRedirectInProgress = false; }, 500);
 }
 
 async function readResponseData(res) {
@@ -259,6 +273,9 @@ async function api(url, options = {}, config = {}) {
             const data = config.expect === 'blob' ? await res.blob() : await readResponseData(res);
 
             if (!res.ok) {
+                if (res.status === 401) {
+                    handleAuthExpired();
+                }
                 const message = getErrorMessage(data, 'Request failed.');
                 if (shouldRetryRequest(method, res.status, attempt, retries)) {
                     lastError = new Error(message);
@@ -1120,54 +1137,60 @@ function buildFixPacks(analysis) {
 }
 
 // ─── Login UI Enhancements ────────────────────────────────────────────────────
-pwdToggle.addEventListener('click', () => {
-    const type = loginPass.getAttribute('type') === 'password' ? 'text' : 'password';
-    loginPass.setAttribute('type', type);
-    pwdToggle.innerHTML = type === 'password'
-        ? '<i class="fa-regular fa-eye"></i>'
-        : '<i class="fa-regular fa-eye-slash"></i>';
-});
+if (pwdToggle && loginPass) {
+    pwdToggle.addEventListener('click', () => {
+        const type = loginPass.getAttribute('type') === 'password' ? 'text' : 'password';
+        loginPass.setAttribute('type', type);
+        pwdToggle.innerHTML = type === 'password'
+            ? '<i class="fa-regular fa-eye"></i>'
+            : '<i class="fa-regular fa-eye-slash"></i>';
+    });
+}
 
-loginInput.addEventListener('input', e => {
-    const val = e.target.value.trim();
-    if (val.length >= 3) {
-        emailCheck.classList.remove('hidden');
-        emailError.classList.remove('show');
-        loginInput.classList.remove('input-error');
-    } else {
-        emailCheck.classList.add('hidden');
-        if (val.length > 0) {
-            emailError.innerText = 'Username must be at least 3 characters';
-            emailError.classList.add('show');
-            loginInput.classList.add('input-error');
-        } else {
-            emailError.classList.remove('show');
+if (loginInput) {
+    loginInput.addEventListener('input', e => {
+        const val = e.target.value.trim();
+        if (val.length >= 3) {
+            emailCheck?.classList.remove('hidden');
+            usernameError?.classList.remove('show');
             loginInput.classList.remove('input-error');
+        } else {
+            emailCheck?.classList.add('hidden');
+            if (val.length > 0) {
+                if (usernameError) usernameError.innerText = 'Username must be at least 3 characters';
+                usernameError?.classList.add('show');
+                loginInput.classList.add('input-error');
+            } else {
+                usernameError?.classList.remove('show');
+                loginInput.classList.remove('input-error');
+            }
         }
-    }
-});
+    });
+}
 
-loginPass.addEventListener('input', e => {
-    const val = e.target.value;
-    if (val.length > 0) {
-        pwdStrength.classList.add('show');
-        let strength = 0;
-        if (val.length > 7) strength += 25;
-        if (/[A-Z]/.test(val)) strength += 25;
-        if (/[0-9]/.test(val)) strength += 25;
-        if (/[^A-Za-z0-9]/.test(val)) strength += 25;
-        strengthFill.style.width = `${strength}%`;
-        if (strength <= 25) { strengthFill.style.background = '#ef4444'; strengthText.innerText = 'Weak'; }
-        else if (strength <= 50) { strengthFill.style.background = '#f59e0b'; strengthText.innerText = 'Fair'; }
-        else if (strength <= 75) { strengthFill.style.background = '#3b82f6'; strengthText.innerText = 'Good'; }
-        else { strengthFill.style.background = '#10b981'; strengthText.innerText = 'Strong'; }
-    } else {
-        pwdStrength.classList.remove('show');
-    }
-});
+if (loginPass && pwdStrength && strengthFill && strengthText) {
+    loginPass.addEventListener('input', e => {
+        const val = e.target.value;
+        if (val.length > 0) {
+            pwdStrength.classList.add('show');
+            let strength = 0;
+            if (val.length > 7) strength += 25;
+            if (/[A-Z]/.test(val)) strength += 25;
+            if (/[0-9]/.test(val)) strength += 25;
+            if (/[^A-Za-z0-9]/.test(val)) strength += 25;
+            strengthFill.style.width = `${strength}%`;
+            if (strength <= 25) { strengthFill.style.background = '#ef4444'; strengthText.innerText = 'Weak'; }
+            else if (strength <= 50) { strengthFill.style.background = '#f59e0b'; strengthText.innerText = 'Fair'; }
+            else if (strength <= 75) { strengthFill.style.background = '#3b82f6'; strengthText.innerText = 'Good'; }
+            else { strengthFill.style.background = '#10b981'; strengthText.innerText = 'Strong'; }
+        } else {
+            pwdStrength.classList.remove('show');
+        }
+    });
+}
 
 // ─── Login Submission ──────────────────────────────────────────────────────────
-loginForm.addEventListener('submit', async e => {
+loginForm?.addEventListener('submit', async e => {
     e.preventDefault();
     const username = loginInput.value.trim();
     const password = loginPass.value;
@@ -1212,9 +1235,18 @@ loginForm.addEventListener('submit', async e => {
 });
 
 // ─── File Upload ──────────────────────────────────────────────────────────────
-fileInput.addEventListener('change', e => {
+fileInput?.addEventListener('change', e => {
     if (e.target.files.length > 0) {
-        selectedFile = e.target.files[0];
+        const file = e.target.files[0];
+        const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+        if (!isPdf) {
+            selectedFile = null;
+            uploadBtn.disabled = true;
+            fileInfo.classList.add('hidden');
+            showToast('Please select a PDF file.', 'error');
+            return;
+        }
+        selectedFile = file;
         fileInfo.classList.remove('hidden');
         fileNameSpan.textContent = selectedFile.name;
         uploadBtn.disabled = false;
@@ -1222,19 +1254,56 @@ fileInput.addEventListener('change', e => {
     }
 });
 
-window.skipUploadAndGoToDashboard = function() {
+if (dropZone && fileInput) {
+    dropZone.addEventListener('click', event => {
+        if (event.target.closest('button, a, input')) return;
+        fileInput.click();
+    });
+    dropZone.addEventListener('dragover', event => {
+        event.preventDefault();
+        dropZone.classList.add('dragover');
+    });
+    dropZone.addEventListener('dragleave', () => {
+        dropZone.classList.remove('dragover');
+    });
+    dropZone.addEventListener('drop', event => {
+        event.preventDefault();
+        dropZone.classList.remove('dragover');
+        const file = event.dataTransfer?.files?.[0];
+        if (!file) return;
+        const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+        if (!isPdf) {
+            showToast('Please drop a PDF file.', 'error');
+            return;
+        }
+        selectedFile = file;
+        fileInfo?.classList.remove('hidden');
+        if (fileNameSpan) fileNameSpan.textContent = file.name;
+        if (uploadBtn) {
+            uploadBtn.disabled = false;
+            uploadBtn.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i> Ingest into Jobify Core';
+        }
+    });
+}
+
+async function skipUploadAndGoToDashboard() {
     resumeLabState.has_resume = false;
     showLoading('Skipping upload, loading dashboard...');
-    loadDailyFeed();
-};
+    await loadDailyFeed();
+}
 
-uploadBtn.addEventListener('click', async () => {
+const skipUploadBtn = document.getElementById('skip-upload-btn');
+skipUploadBtn?.addEventListener('click', () => {
+    skipUploadAndGoToDashboard();
+});
+
+uploadBtn?.addEventListener('click', async () => {
     if (!selectedFile || !authToken) return;
 
     showLoading('Saving resume securely...');
     try {
         await uploadResumeFile(selectedFile);
-        loadDailyFeed();
+        await loadDailyFeed();
     } catch (err) {
         showToast(err.message, 'error');
         switchPage('page-home');
@@ -1414,85 +1483,13 @@ if (resumeCompareToggle) {
     });
 }
 
-// ─── Job Feed ─────────────────────────────────────────────────────────────────
-async function loadDailyFeed() {
-    switchPage('page-loading');
-    const loadingText = document.getElementById('loading-text');
-    const steps = [
-        'Parsing your resume...',
-        'Inferring best-fit roles with AI...',
-        'Searching live job listings...',
-        'Scoring and ranking your matches...',
-        'Almost there...'
-    ];
-    let stepIdx = 0;
-    loadingText.innerText = steps[0];
-    const stepTimer = setInterval(() => {
-        stepIdx = Math.min(stepIdx + 1, steps.length - 1);
-        loadingText.innerText = steps[stepIdx];
-    }, 9000);
-
-    try {
-        const res = await fetch('/api/jobs/feed', { headers: getAuthHeaders() });
-        const data = await readResponseData(res);
-        clearInterval(stepTimer);
-        if (!res.ok) throw new Error(getErrorMessage(data, 'Feed error'));
-        renderJobs(data.jobs || []);
-        switchPage('page-results');
-        loadCoachDashboard(false);
-        loadTracker();
-        return true;
-    } catch (err) {
-        clearInterval(stepTimer);
-        renderJobs([]);
-        switchPage('page-results');
-        showToast('Job feed unavailable right now: ' + err.message, 'error');
-        return false;
-    }
-}
-
-function renderJobs(jobs) {
-    jobsContainer.innerHTML = '';
-    if (jobs.length === 0) {
-        jobsContainer.innerHTML = '<p class="empty-state">No matching jobs found. Try uploading an updated resume.</p>';
-        return;
-    }
-    jobs.forEach(job => {
-        const card = document.createElement('div');
-        card.className = 'crm-job-card';
-        // Sanitize before injecting — prevents XSS from AI-generated content
-        const title   = sanitize(job.role || job.title || 'Unknown Role');
-        const company = sanitize(job.company || 'Unknown Company');
-        const score   = Number(job.match_score) || 0;
-        const missing = Array.isArray(job.missing_skills) ? job.missing_skills.map(sanitize).join(', ') : 'None';
-        const link    = job.link || job.url || '#';
-
-        card.innerHTML = `
-            <div class="card-header">
-                <div>
-                    <h3>${title}</h3>
-                    <p><i class="fa-solid fa-building"></i> ${company}</p>
-                    <span class="deep-match-badge">Match: ${score}%</span>
-                </div>
-                <button class="btn-outline track-btn" data-company="${company}" data-title="${title}" data-url="${sanitize(link)}">
-                    <i class="fa-solid fa-wand-magic-sparkles"></i> Track &amp; Auto-Tailor
-                </button>
-            </div>
-            <div class="card-footer">
-                <p><strong>Missing Skills:</strong> ${missing || 'None — great fit!'}</p>
-                <div class="card-footer-row">
-                    <a href="${sanitize(link)}" target="_blank" rel="noopener" class="view-link">View Job <i class="fa-solid fa-arrow-right"></i></a>
-                </div>
-            </div>`;
-        jobsContainer.appendChild(card);
-    });
-
-    // Event delegation — handles all track buttons on the page
-    jobsContainer.addEventListener('click', e => {
-        const btn = e.target.closest('.track-btn');
-        if (btn) trackJob(btn.dataset.company, btn.dataset.title, btn.dataset.url);
-    });
-}
+// ─── Job Feed (deduplicated) ─────────────────────────────────────────────────
+/*
+ * Legacy/duplicate job-feed functions removed. The canonical `loadDailyFeed`
+ * and `renderJobs` implementations are present later in this file and are
+ * used by the application. Removing older duplicates prevents shadowing and
+ * duplicate event bindings that caused layout and behavioral inconsistencies.
+ */
 
 // ─── Tracker ──────────────────────────────────────────────────────────────────
 async function trackJob(company, title, url) {
@@ -1504,18 +1501,22 @@ async function trackJob(company, title, url) {
             body: JSON.stringify({ company_name: company, job_title: title, description_url: url }),
         });
         const data = await readResponseData(res);
-        if (!res.ok) throw new Error(data.error);
+        if (!res.ok) throw new Error(getErrorMessage(data, 'Could not save this job right now.'));
 
         switchPage('page-results');
         document.querySelector('[data-pane="pane-tracker"]').click();
         showToast('Job saved. Resume tailoring has started.', 'success');
         // Poll tracker every 5 seconds until status changes from "Tailoring..."
-        loadTracker();
-        const poll = setInterval(async () => {
+        await loadTracker();
+        if (trackerPollTimer) clearInterval(trackerPollTimer);
+        trackerPollTimer = setInterval(async () => {
             await loadTracker();
             const cards = trackerContainer.querySelectorAll('.status-badge');
             const stillTailoring = [...cards].some(c => c.textContent.includes('Tailoring'));
-            if (!stillTailoring) clearInterval(poll);
+            if (!stillTailoring && trackerPollTimer) {
+                clearInterval(trackerPollTimer);
+                trackerPollTimer = null;
+            }
         }, 5000);
     } catch (err) {
         showToast(err.message, 'error');
@@ -1526,23 +1527,30 @@ async function trackJob(company, title, url) {
 async function loadTracker() {
     try {
         const res = await fetch('/api/jobs/tracker', { headers: getAuthHeaders() });
-        if (!res.ok) return;
+        if (!res.ok) {
+            if (res.status === 401) handleAuthExpired();
+            return;
+        }
         const apps = await readResponseData(res);
+        const safeApps = Array.isArray(apps) ? apps : [];
 
         trackerContainer.innerHTML = '';
-        if (apps.length === 0) {
+        if (safeApps.length === 0) {
             trackerContainer.innerHTML = '<p class="empty-state">No saved jobs yet. Use "Save Job & Tailor Resume" on any job card.</p>';
             return;
         }
 
-        apps.forEach(app => {
+        safeApps.forEach(app => {
             const card = document.createElement('div');
             card.className = 'crm-job-card tracker-card';
 
             let bulletsHTML = '';
             if (app.tailored_resume_bullets) {
                 try {
-                    const bullets = JSON.parse(app.tailored_resume_bullets);
+                    const rawBullets = typeof app.tailored_resume_bullets === 'string'
+                        ? JSON.parse(app.tailored_resume_bullets)
+                        : app.tailored_resume_bullets;
+                    const bullets = Array.isArray(rawBullets) ? rawBullets : [];
                     bulletsHTML = bullets.map(b => `
                         <div class="bullet-item">
                             <i class="fa-solid fa-circle bullet-dot"></i>
@@ -1985,70 +1993,7 @@ function renderProgressTracker(analysis) {
     }
 }
 
-function renderResumePreview() {
-    if (!resumeDraftPreview) return;
-
-    const showingBefore = resumeCompareView === 'before';
-    const previewText = showingBefore
-        ? (resumeLabState.original_resume || resumeLabState.current_resume || '')
-        : (resumeLabState.current_resume || resumeLabState.original_resume || '');
-    const hasParsedResume = resumeLabState.parsed_resume && Object.keys(resumeLabState.parsed_resume).length > 0;
-    const parsedResume = showingBefore
-        ? parseResumeTextForPreview(previewText)
-        : (hasParsedResume ? resumeLabState.parsed_resume : parseResumeTextForPreview(previewText));
-    const appliedSet = new Set((resumeLabState.applied_fixes || []).map(fix => fix.improved));
-    const recentHighlightSet = new Set((resumeLabState.ui?.recentHighlightLines || []).map(line => String(line).trim()));
-    const sections = [
-        ['summary', parsedResume.summary ? [parsedResume.summary] : []],
-        ['experience', parsedResume.experience || []],
-        ['projects', parsedResume.projects || []],
-        ['skills', parsedResume.skills || []],
-    ];
-
-    const content = sections
-        .filter(([, items]) => Array.isArray(items) && items.length)
-        .map(([label, items]) => {
-            const list = items.map(item => {
-                const itemText = String(item);
-                const safe = sanitize(itemText);
-                const isApplied = !showingBefore && appliedSet.has(itemText);
-                const isFresh = !showingBefore && recentHighlightSet.has(itemText.trim());
-                return isApplied
-                    ? `<li><span class="updated-line ${isFresh ? 'fresh-highlight' : ''}">${safe}</span></li>`
-                    : `<li>${safe}</li>`;
-            }).join('');
-
-            const summaryText = String(items[0] || '');
-            const summaryApplied = !showingBefore && appliedSet.has(summaryText);
-            const summaryFresh = !showingBefore && recentHighlightSet.has(summaryText.trim());
-
-            return `
-                <section class="resume-preview-section ${showingBefore ? 'is-before' : ''}">
-                    <h4>${sanitize(label)}</h4>
-                    ${label === 'summary'
-                        ? `<p>${summaryApplied ? `<span class="updated-line ${summaryFresh ? 'fresh-highlight' : ''}">${sanitize(summaryText)}</span>` : sanitize(summaryText)}</p>`
-                        : `<ul>${list}</ul>`}
-                </section>
-            `;
-        }).join('');
-
-    if (resumeCompareToggle) {
-        resumeCompareToggle.querySelectorAll('[data-compare-view]').forEach(button => {
-            button.classList.toggle('active', button.dataset.compareView === resumeCompareView);
-        });
-    }
-
-    resumeDraftPreview.innerHTML = `
-        <div class="resume-preview-meta">
-            <p>${showingBefore ? 'Original uploaded draft for side-by-side thinking.' : 'Working draft with applied fixes and edits.'}</p>
-            <span class="preview-chip">
-                <i class="fa-solid fa-${showingBefore ? 'clock-rotate-left' : 'wand-magic-sparkles'}"></i>
-                ${showingBefore ? 'Before' : 'After'}
-            </span>
-        </div>
-        ${content || '<p class="empty-state">Preview will appear after analysis.</p>'}
-    `;
-}
+/* Duplicate `renderResumePreview` removed — canonical implementation exists later in file. */
 
 function renderIssueSections(analysis) {
     if (!resumeScoreContainer) return;
@@ -2894,38 +2839,7 @@ async function loadSessionsList() {
 }
 
 // ── Load a specific session's history ────────────────────────
-async function loadSessionHistory(sessionDbId, role, difficulty, sidebarEl) {
-    try {
-        const res = await fetch(`/api/interview/sessions/${sessionDbId}`, { headers: getAuthHeaders() });
-        if (!res.ok) return;
-        const data = await readResponseData(res);
-
-        interviewSessionId = data.session_token || null;
-        scores = data.messages.filter(m => m.score !== undefined).map(m => m.score);
-
-        openChatView(role, difficulty);
-        chatMessages.innerHTML = '';
-
-        data.messages.forEach(m => {
-            if (m.role === 'ai')       appendMsg('ai', m.content, null, true);
-            else if (m.role === 'user') appendMsg('user', m.content, null, true);
-            else if (m.role === 'feedback') appendMsg('feedback', m.content, m.score, true);
-        });
-
-        chatMessages.scrollTop = chatMessages.scrollHeight;
-
-        if (scores.length > 0) {
-            const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
-            document.getElementById('chat-score-display').textContent = `Avg Score: ${avg.toFixed(1)}/10`;
-        }
-
-        if (activeSidebarItem) activeSidebarItem.classList.remove('active');
-        sidebarEl.classList.add('active');
-        activeSidebarItem = sidebarEl;
-    } catch (err) {
-        showToast('Failed to load session history', 'error');
-    }
-}
+/* Duplicate `loadSessionHistory` removed — canonical implementation exists later in file. */
 
 // ── UI helpers ───────────────────────────────────────────────
 function openChatView(role, diff) {
@@ -3211,13 +3125,14 @@ function renderJobsFeedSummary(feedMeta = {}) {
 
 function renderJobs(jobs, feedMeta = {}) {
     renderJobsFeedSummary(feedMeta);
+    latestJobsFeed = Array.isArray(jobs) ? jobs : [];
     jobsContainer.innerHTML = '';
     if (!jobs.length) {
         jobsContainer.innerHTML = '<p class="empty-state">No strong matches found yet. Try again after updating your resume.</p>';
         return;
     }
 
-    jobsContainer.innerHTML = jobs.map(job => {
+    jobsContainer.innerHTML = latestJobsFeed.map((job, index) => {
         const title = sanitize(job.role || job.title || 'Unknown Role');
         const company = sanitize(job.company || 'Unknown Company');
         const location = sanitize(job.location || 'Location unavailable');
@@ -3271,7 +3186,7 @@ function renderJobs(jobs, feedMeta = {}) {
                     </div>
                 </div>
                 <div class="card-footer-row job-card-actions">
-                    <button class="btn-outline track-btn" data-company="${company}" data-title="${title}" data-url="${sanitize(link)}">
+                    <button class="btn-outline track-btn" data-job-index="${index}">
                         <i class="fa-solid fa-wand-magic-sparkles"></i> Save Job &amp; Tailor Resume
                     </button>
                     <a href="${sanitize(link)}" target="_blank" rel="noopener" class="view-link">View Job <i class="fa-solid fa-arrow-right"></i></a>
@@ -3282,7 +3197,14 @@ function renderJobs(jobs, feedMeta = {}) {
 
     jobsContainer.onclick = event => {
         const btn = event.target.closest('.track-btn');
-        if (btn) trackJob(btn.dataset.company, btn.dataset.title, btn.dataset.url);
+        if (!btn) return;
+        const idx = Number(btn.dataset.jobIndex);
+        if (!Number.isInteger(idx) || idx < 0 || idx >= latestJobsFeed.length) return;
+        const source = latestJobsFeed[idx] || {};
+        const company = source.company || 'Unknown Company';
+        const title = source.role || source.title || 'Unknown Role';
+        const url = source.link || source.url || '#';
+        trackJob(company, title, url);
     };
 }
 

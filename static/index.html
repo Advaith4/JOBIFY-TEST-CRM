@@ -14,7 +14,7 @@
     <div class="glow-orb orb-secondary"></div>
 
     <!-- LOGIN PAGE -->
-    <main id="page-login" class="page active modern-login-page">
+    <div id="page-login" role="main" class="page active modern-login-page">
         <section class="split-login-container">
             <!-- LEFT PANEL -->
             <div class="login-panel">
@@ -36,7 +36,7 @@
                                 <input type="text" id="login-username" placeholder="jobify_user" required autocomplete="username">
                                 <i class="fa-solid fa-circle-check auth-check hidden"></i>
                             </div>
-                            <span class="error-text" id="email-error"></span>
+                            <span class="error-text" id="username-error"></span>
                         </div>
                         
                         <div class="modern-input-group">
@@ -118,15 +118,15 @@
                 </div>
             </div>
         </section>
-    </main>
+    </div>
     <!-- UPLOAD RESUME PAGE -->
-    <main id="page-home" class="page hidden">
+    <div id="page-home" role="main" class="page hidden">
         <section class="upload-wrapper">
             <div class="content-center">
                 <h1 class="headline-large">Store your resume,<br><span class="gradient-text">permanently.</span></h1>
                 <p class="subtitle mt-3">We securely extract your profile into our Supabase vector engine. Our AI reads it to hunt for jobs daily.</p>
                 
-                <div class="upload-dropzone glass-card mt-5" id="drop-zone" onclick="document.getElementById('file-input').click()">
+                <div class="upload-dropzone glass-card mt-5" id="drop-zone">
                     <input type="file" id="file-input" accept="application/pdf" hidden>
                     <div class="icon-blob"><i class="fa-regular fa-file-pdf"></i></div>
                     <h3>Drag & Drop your precise PDF</h3>
@@ -136,29 +136,29 @@
                     </div>
                 </div>
                 
-                <div class="upload-actions" style="display: flex; gap: 1rem; margin-top: 1rem;">
+                <div class="upload-actions">
                     <button class="btn btn-primary w-full" id="upload-db-btn" disabled>
                         <i class="fa-solid fa-cloud-arrow-up"></i> Select PDF to Ingest
                     </button>
-                    <button class="btn btn-outline w-full" id="skip-upload-btn" onclick="skipUploadAndGoToDashboard()">
+                    <button class="btn btn-outline w-full" id="skip-upload-btn">
                         Skip for Now <i class="fa-solid fa-arrow-right"></i>
                     </button>
                 </div>
             </div>
         </section>
-    </main>
+    </div>
 
     <!-- LOADING PAGE -->
-    <main id="page-loading" class="page hidden">
+    <div id="page-loading" role="main" class="page hidden">
         <div class="loader-wrapper">
             <div class="modern-spinner"></div>
             <h2 id="loading-text" class="gradient-text loader-text">Processing...</h2>
             <p class="loader-sub">Orchestrating AI pipeline operations</p>
         </div>
-    </main>
+    </div>
 
     <!-- DASHBOARD PAGE -->
-    <main id="page-results" class="page hidden dashboard-layout">
+    <div id="page-results" role="main" class="page hidden dashboard-layout">
         <nav class="top-nav glass-panel">
             <div class="brand">
                 <div class="brand-icon small"><i class="fa-solid fa-bolt"></i></div>
@@ -659,7 +659,7 @@
                 <aside class="chat-sidebar" id="chat-sidebar">
                     <div class="chat-sidebar-header">
                         <span><i class="fa-solid fa-robot"></i> Mock Interview</span>
-                        <button id="new-interview-btn" class="new-chat-btn" title="New Session"><i class="fa-solid fa-plus"></i></button>
+                        <button id="new-interview-btn" class="new-chat-btn" title="New Session" aria-label="Start a new interview session"><i class="fa-solid fa-plus"></i></button>
                     </div>
                     <div id="sidebar-setup" class="sidebar-setup">
                         <div class="sidebar-field">
@@ -727,7 +727,7 @@
                                 <textarea id="interview-answer-input" placeholder="Answer in 5-10 lines. Use specifics, tradeoffs, and outcomes." rows="1"></textarea>
                                 <div id="chat-answer-hint" class="chat-answer-hint">Answer target: 5-10 lines with context, decision-making, and measurable impact.</div>
                             </div>
-                            <button id="submit-answer-btn" class="send-btn" title="Send Answer">
+                            <button id="submit-answer-btn" class="send-btn" title="Send Answer" aria-label="Send interview answer">
                                 <i class="fa-solid fa-paper-plane"></i>
                             </button>
                         </div>
@@ -736,7 +736,7 @@
 
             </div>
         </section><!-- /content-area -->
-    </main>
+    </div>
 
     <script src="script.js?v=22"></script>
 </body>

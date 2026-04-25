@@ -34,7 +34,12 @@ def _run_tailor_in_background(application_id: int, resume_text: str, job_title: 
     jd_context = f"{job_title} at {company}. Link: {url}"
     try:
         result = run_tailored_resume_rewriter(resume_text, jd_context)
-        bullets = json.dumps(result.get("rewritten_lines", []))
+        if isinstance(result, dict):
+            rewritten = result.get("rewritten_lines", [])
+        else:
+            rewritten = []
+        rewritten = rewritten if isinstance(rewritten, list) else []
+        bullets = json.dumps(rewritten)
         status = "Draft Ready"
     except Exception as exc:
         logger.error("Tailor background task failed: %s", exc)
@@ -69,10 +74,17 @@ def get_feed(
 
     try:
         from crew import run_job_crew
-        return run_job_crew(resume.raw_text, prefs)
+        result = run_job_crew(resume.raw_text, prefs)
+        if isinstance(result, dict):
+            result.setdefault("jobs", result.get("jobs") if isinstance(result.get("jobs"), list) else [])
+            return result
+        if isinstance(result, list):
+            return {"jobs": result, "summary": {}}
+        logger.warning("run_job_crew returned unexpected type: %s", type(result).__name__)
+        return {"jobs": [], "summary": {}}
     except Exception as exc:
         logger.error("Job feed pipeline failed: %s", exc, exc_info=True)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Could not generate job feed right now. Please try again.")
 
 
 @router.post("/track", status_code=202)

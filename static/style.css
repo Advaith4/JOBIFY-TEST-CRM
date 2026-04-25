@@ -28,6 +28,7 @@
     
     --font-head: 'Outfit', sans-serif;
     --font-body: 'Inter', sans-serif;
+    --font-doc: 'Source Serif 4', serif;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -1968,16 +1969,7 @@ body {
     .chat-sidebar { width: 100%; min-width: 0; height: auto; max-height: 220px; border-right: none; border-bottom: 1px solid rgba(255,255,255,0.06); }
 }
 
-:root {
-    --font-doc: 'Source Serif 4', serif;
-    --paper-bg: #f8f4ea;
-    --paper-bg-alt: #fffdf8;
-    --paper-text: #172033;
-}
-
-body {
-    line-height: 1.6;
-}
+/* NOTE: paper typography vars merged into top-level :root for consistency */
 
 .interview-live .top-nav {
     display: none;
@@ -2554,3 +2546,230 @@ body {
         grid-template-columns: 1fr;
     }
 }
+
+/* ==========================
+   Production UI Overrides
+   - enforce consistent card heights, inner scrolling for long text
+   - reduce overly strong glows and shadows
+   - improve chip wrapping and text overflow
+   - unify chat input alignment
+   ========================== */
+
+.grid-card-layout {
+    /* equal-height rows, inner elements handle overflow */
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 1.5rem;
+    grid-auto-rows: 1fr;
+    align-items: stretch;
+}
+
+.crm-job-card {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    transition: transform 0.28s ease, border-color 0.28s ease;
+}
+
+.crm-job-card .card-header,
+.crm-job-card .card-footer {
+    flex: 0 0 auto;
+}
+
+.crm-job-card .job-reason-grid {
+    /* take remaining space and make columns equal height */
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.8rem;
+    flex: 1 1 auto;
+    min-height: 0; /* allow children to scroll */
+}
+
+.job-reason-card {
+    padding: 0.9rem;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.06);
+    background: rgba(255,255,255,0.02);
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.job-reason-card p {
+    margin: 0;
+    color: var(--text-primary);
+    font-size: 0.92rem;
+    line-height: 1.5;
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding-right: 6px; /* make room for scrollbar */
+}
+
+.job-skill-chip {
+    padding: 0.36rem 0.72rem;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 700;
+    white-space: nowrap;
+    max-width: 180px;
+    display: inline-flex;
+    align-items: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.btn-primary {
+    box-shadow: 0 6px 18px rgba(139,92,246,0.18);
+}
+
+.orb-primary, .orb-secondary {
+    opacity: 0.18;
+    filter: blur(80px);
+}
+
+.mock-dash { transform: none; box-shadow: 8px 12px 30px rgba(0,0,0,0.36); }
+
+/* Chat input: unified, single authoritative rule */
+.chat-input-bar {
+    padding: 0.9rem 1.25rem;
+    border-top: 1px solid rgba(255,255,255,0.06);
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    background: rgba(0,0,0,0.12);
+    flex-shrink: 0;
+}
+
+.chat-input-stack { flex: 1; display:flex; flex-direction:column; gap:0.5rem; min-width:0; }
+
+#interview-answer-input { min-height:44px; max-height:140px; resize:none; overflow:auto; }
+
+/* Accessibility tweaks: icon-only buttons */
+.new-chat-btn[aria-label], .send-btn[aria-label], .chat-fullscreen-btn[aria-label] { outline-offset: 3px; }
+
+/* subtle hover/tap states */
+.btn-outline:hover { transform: translateY(-2px); }
+.btn-modern-primary:hover { transform: translateY(-2px); }
+
+/* ==========================
+   Production polish pass
+   ========================== */
+
+.upload-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+    margin-top: 1rem;
+}
+
+.upload-dropzone.dragover {
+    border-color: var(--secondary);
+    background: rgba(6, 182, 212, 0.08);
+}
+
+.tab.active {
+    color: #c4b5fd;
+    background: rgba(139, 92, 246, 0.16);
+}
+
+.top-nav {
+    gap: 1rem;
+}
+
+.nav-links {
+    flex: 1;
+    min-width: 0;
+    overflow-x: auto;
+    padding-bottom: 0.2rem;
+}
+
+.nav-links::-webkit-scrollbar {
+    height: 4px;
+}
+
+.nav-links::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.16);
+    border-radius: 999px;
+}
+
+.grid-card-layout {
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+}
+
+.crm-job-card {
+    border-radius: 18px;
+}
+
+.job-reason-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    align-items: stretch;
+}
+
+.job-reason-card {
+    max-height: none;
+    min-height: 150px;
+}
+
+.job-reason-card p {
+    overflow: visible;
+    display: -webkit-box;
+    -webkit-line-clamp: 6;
+    -webkit-box-orient: vertical;
+}
+
+.job-chip-group {
+    margin-top: 0.35rem;
+}
+
+.job-chip-row {
+    min-height: 2.2rem;
+    align-content: flex-start;
+}
+
+.job-skill-chip {
+    max-width: 100%;
+}
+
+.btn-outline,
+.btn-modern-primary,
+.btn-primary,
+.btn-social-outline,
+.tab,
+.track-btn,
+.view-link {
+    transition: background-color 0.22s ease, border-color 0.22s ease, color 0.22s ease, transform 0.2s ease, box-shadow 0.22s ease;
+}
+
+.btn-outline:focus-visible,
+.btn-modern-primary:focus-visible,
+.btn-primary:focus-visible,
+.tab:focus-visible,
+.track-btn:focus-visible,
+.view-link:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+    outline: 2px solid rgba(6, 182, 212, 0.75);
+    outline-offset: 2px;
+}
+
+@media (max-width: 980px) {
+    .upload-actions {
+        grid-template-columns: 1fr;
+    }
+
+    .top-nav {
+        flex-wrap: wrap;
+        align-items: flex-start;
+    }
+
+    .user-badge {
+        margin-left: auto;
+    }
+
+    .grid-card-layout {
+        grid-template-columns: 1fr;
+    }
+}
+

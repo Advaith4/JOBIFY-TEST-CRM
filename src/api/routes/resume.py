@@ -110,6 +110,7 @@ async def upload_resume(
         }
 
     finally:
+        await file.close()
         if os.path.exists(temp_path):
             os.remove(temp_path)
 
