@@ -2828,8 +2828,35 @@ const chatTurnCounter = document.getElementById('chat-turn-counter');
 const chatLiveNote = document.getElementById('chat-live-note');
 const chatAnswerHint = document.getElementById('chat-answer-hint');
 const chatFullscreenBtn = document.getElementById('chat-fullscreen-btn');
+const voicePlayBtn = document.getElementById('voice-play-btn');
+const voicePauseBtn = document.getElementById('voice-pause-btn');
+const voiceRepeatBtn = document.getElementById('voice-repeat-btn');
 let scores = [];
 let activeSidebarItem = null;
+let latestInterviewerTurnText = '';
+let interviewUtterance = null;
+
+function stopInterviewSpeech() {
+    if (!('speechSynthesis' in window)) return;
+    window.speechSynthesis.cancel();
+    interviewUtterance = null;
+}
+
+function speakInterviewText(text, { forceRestart = false } = {}) {
+    if (!('speechSynthesis' in window)) return;
+    const content = String(text || '').trim();
+    if (!content) return;
+
+    if (forceRestart) stopInterviewSpeech();
+    if (window.speechSynthesis.speaking && !forceRestart) return;
+
+    const utterance = new SpeechSynthesisUtterance(content);
+    utterance.rate = 1;
+    utterance.pitch = 1;
+    utterance.volume = 1;
+    interviewUtterance = utterance;
+    window.speechSynthesis.speak(utterance);
+}
 
 // Diff slider live label
 if (diffSlider) {
@@ -2837,6 +2864,33 @@ if (diffSlider) {
         diffLabel.textContent = diffSlider.value;
         const pct = ((diffSlider.value - 1) / 9) * 100;
         diffSlider.style.background = `linear-gradient(to right, var(--primary) ${pct}%, rgba(255,255,255,0.1) ${pct}%)`;
+    });
+}
+
+if (voicePlayBtn) {
+    voicePlayBtn.addEventListener('click', () => {
+        const text = latestInterviewerTurnText || 'No active interviewer question yet.';
+        speakInterviewText(text, { forceRestart: true });
+    });
+}
+
+if (voicePauseBtn) {
+    voicePauseBtn.addEventListener('click', () => {
+        if (!('speechSynthesis' in window)) return;
+        if (window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
+            window.speechSynthesis.pause();
+            return;
+        }
+        if (window.speechSynthesis.paused) {
+            window.speechSynthesis.resume();
+        }
+    });
+}
+
+if (voiceRepeatBtn) {
+    voiceRepeatBtn.addEventListener('click', () => {
+        if (!latestInterviewerTurnText) return;
+        speakInterviewText(latestInterviewerTurnText, { forceRestart: true });
     });
 }
 
@@ -2897,6 +2951,7 @@ newInterviewBtn.addEventListener('click', () => {
     diffLabel.textContent = '5';
     if (interviewPersonaSelect) interviewPersonaSelect.value = 'strict';
     updateInterviewStageMeta({ interviewer_persona: 'strict', pressure_level: 'medium', focus_area: 'opening', session_turn: 0 });
+    stopInterviewSpeech();
 });
 
 // ── Submit answer ────────────────────────────────────────────
@@ -2908,6 +2963,7 @@ submitAnswerBtn.addEventListener('click', async () => {
     answerInput.value = '';
     answerInput.style.height = 'auto';
     submitAnswerBtn.disabled = true;
+    let interviewEnded = false;
 
     const typingId = appendTyping();
 
@@ -2940,11 +2996,14 @@ submitAnswerBtn.addEventListener('click', async () => {
             await wait(220 + Math.random() * 240);
             const aiWrap = appendMsg('ai', '', null, false, data);
             const aiBubble = aiWrap.querySelector('.msg-bubble');
-            await typeOutMessage(aiBubble, formatInterviewerTurn(data), {
+            const interviewerTurnText = formatInterviewerTurn(data);
+            await typeOutMessage(aiBubble, interviewerTurnText, {
                 pressure: data.pressure_level || data.persona?.pressure,
                 interruption_text: data.interviewer_signal || 'Be specific about the decision you made.',
                 meta: data,
             });
+            latestInterviewerTurnText = interviewerTurnText;
+            speakInterviewText(interviewerTurnText, { forceRestart: true });
         }
 
         if (score !== null) {
@@ -2952,12 +3011,31 @@ submitAnswerBtn.addEventListener('click', async () => {
             const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
             document.getElementById('chat-score-display').textContent = `Avg Score: ${avg.toFixed(1)}/10`;
         }
+
+        if (data.interview_complete && data.final_feedback) {
+            const ff = data.final_feedback;
+            const summary = [
+                `Final Evaluation (${ff.verdict || data.final_verdict || 'Complete'})`,
+                `Overall score: ${ff.overall_score ?? data.avg_score ?? '--'}/10`,
+                `Strengths: ${(ff.strengths || []).join('; ') || '—'}`,
+                `Weaknesses: ${(ff.weaknesses || []).join('; ') || '—'}`,
+                `Improvement plan: ${(ff.improvement_plan || []).join('; ') || '—'}`,
+            ].join('\n');
+            appendMsg('feedback', summary, Math.round(Number(ff.overall_score ?? data.avg_score ?? 0)), false, { focus_area: 'final evaluation' });
+            answerInput.value = '';
+            answerInput.disabled = true;
+            submitAnswerBtn.disabled = true;
+            answerInput.placeholder = 'Interview completed. Start a new session for another round.';
+            interviewEnded = true;
+        }
     } catch (err) {
         removeTyping(typingId);
         showToast(err.message, 'error');
     } finally {
-        submitAnswerBtn.disabled = false;
-        answerInput.focus();
+        if (!interviewEnded) {
+            submitAnswerBtn.disabled = false;
+            answerInput.focus();
+        }
     }
 });
 
@@ -3111,24 +3189,7 @@ function requestInterviewFullscreen() {
 
 function formatInterviewerTurn(data = {}) {
     const question = String(data.next_question || data.question || 'Walk me through your reasoning.').trim();
-    const focusArea = String(data.focus_area || 'role fundamentals').trim();
-    const signal = String(data.interviewer_signal || 'I will push for specifics.').trim();
-    const expectation = String(
-        data.answer_expectation || 'Answer in 5-10 lines with context, decisions, tradeoffs, and measurable outcome.'
-    ).trim();
-    const pressure = String(data.pressure_level || data.persona?.pressure || 'medium').toLowerCase();
-    const toneNote = pressure === 'high'
-        ? 'Tone: demanding — be concise; expect interruptions and rapid follow-ups.'
-        : pressure === 'low' || pressure === 'friendly'
-            ? 'Tone: supportive — take a beat and explain clearly.'
-            : 'Tone: professional and direct.';
-    return [
-        toneNote,
-        question,
-        `Focus: ${focusArea}.`,
-        `Interviewer signal: ${signal}`,
-        `Answer target: ${expectation}`,
-    ].join('\n\n');
+    return question;
 }
 
 function formatInterviewFeedbackMessage(data = {}) {
@@ -3176,6 +3237,7 @@ function updateInterviewStageMeta(meta = {}) {
         .replace(/\b\w/g, char => char.toUpperCase());
     const pressure = String(meta.pressure_level || meta.persona?.pressure || 'medium');
     const focus = String(meta.focus_area || 'opening').trim();
+    const phase = String(meta.phase || '').trim();
     const turnCount = Number(meta.session_turn || scores.length || 0);
     const expectation = String(
         meta.answer_expectation || 'Answer in 5-10 lines with context, decisions, tradeoffs, and measurable outcome.'
@@ -3183,7 +3245,7 @@ function updateInterviewStageMeta(meta = {}) {
 
     if (chatPersonaBadge) chatPersonaBadge.textContent = personaKey;
     if (chatPressureBadge) chatPressureBadge.textContent = `Pressure: ${pressure}`;
-    if (chatFocusBadge) chatFocusBadge.textContent = `Focus: ${focus}`;
+    if (chatFocusBadge) chatFocusBadge.textContent = phase ? `Phase: ${phase} · Focus: ${focus}` : `Focus: ${focus}`;
     if (chatTurnCounter) chatTurnCounter.textContent = `Turn ${turnCount}`;
     if (chatAnswerHint) chatAnswerHint.textContent = `Answer target: ${expectation}`;
     if (chatLiveNote) {
@@ -3219,6 +3281,9 @@ function openChatView(role, diff, meta = {}) {
     document.getElementById('chat-role-label').textContent = role;
     document.getElementById('chat-diff-badge').textContent = `Difficulty ${diff}/10`;
     document.getElementById('chat-score-display').textContent = '';
+    answerInput.disabled = false;
+    submitAnswerBtn.disabled = false;
+    answerInput.placeholder = 'Answer in 5-10 lines. Use specifics, tradeoffs, and outcomes.';
     updateInterviewStageMeta({ ...meta, difficulty: diff });
 }
 
@@ -3232,8 +3297,7 @@ function appendMsg(role, content, score = null, noScroll = false, meta = {}) {
         feedback: '<i class="fa-solid fa-square-poll-vertical"></i> Coach Debrief',
     };
     const metaBits = [];
-    if (role === 'ai' && meta.pressure_level) metaBits.push(`Pressure ${sanitize(String(meta.pressure_level))}`);
-    if (role === 'ai' && meta.focus_area) metaBits.push(`Focus ${sanitize(String(meta.focus_area))}`);
+    // Keep interviewer bubble clean like a real interview; no meta chips for AI turns.
     if (role === 'feedback' && meta.focus_area) metaBits.push(`Target ${sanitize(String(meta.focus_area))}`);
     // Emotion indicator for feedback
     let emotion = '';
@@ -3250,6 +3314,9 @@ function appendMsg(role, content, score = null, noScroll = false, meta = {}) {
 
     chatMessages.appendChild(wrap);
     if (!noScroll) chatMessages.scrollTop = chatMessages.scrollHeight;
+    if (role === 'ai') {
+        latestInterviewerTurnText = String(content || '').trim();
+    }
     return wrap;
 }
 

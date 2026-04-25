@@ -52,6 +52,9 @@ def create_interview_start_task(
     interviewer_persona=None,
     coach_memory=None,
     domain_focus="",
+    phase_name="Introduction",
+    phase_goal="",
+    phase_focus="",
 ):
     weak_areas = weak_areas or []
     resume_context = resume_context or {}
@@ -66,6 +69,9 @@ Difficulty: {difficulty}/10
 Training mode: {training_mode}
 Domain focus: {domain_focus}
 Requested focus mode: {focus_mode}
+Current interview phase: {phase_name}
+Phase objective: {phase_goal}
+Phase focus: {phase_focus}
 
 INTERVIEWER PERSONA:
 {interviewer_persona}
@@ -85,6 +91,8 @@ RESUME CONTEXT:
 INTERVIEW RULES:
 - Ask exactly ONE question, but make it feel like a real interviewer turn.
 - The question must be detailed and specific, not generic.
+- The question MUST match the current interview phase objective.
+- If current phase is "Introduction", the question MUST start with a natural "Tell me about yourself..." style opener.
 - If focus_mode is weak_area, anchor the question to a weak area or low-scoring section.
 - If focus_mode is domain_specific, prioritize domain_focus and technical depth.
 - If focus_mode is behavioral_only, ask a behavioral question tied to real resume evidence.
@@ -98,6 +106,7 @@ STYLE RULES:
 - Make the interviewer sound human, direct, and emotionally believable.
 - Include enough context so the candidate knows what level of detail is expected.
 - Return a question that would naturally lead to a 5-10 line answer.
+- Do not output labels like "Tone:", "Focus:", or "Answer target:" inside the question text.
 
 Return ONLY JSON.
 
@@ -121,6 +130,9 @@ OUTPUT FORMAT:
         interviewer_persona=_json_context(interviewer_persona),
         coach_memory=_json_context(coach_memory),
         domain_focus=domain_focus or "role fundamentals",
+        phase_name=phase_name,
+        phase_goal=phase_goal or "Set context and evaluate the candidate realistically.",
+        phase_focus=phase_focus or "Role-relevant evidence",
     )
 
     return Task(
@@ -209,6 +221,9 @@ def create_followup_task(
     conversation_history=None,
     last_score=None,
     current_focus_area="",
+    phase_name="Introduction",
+    phase_goal="",
+    phase_focus="",
 ):
     weak_areas = weak_areas or []
     resume_context = resume_context or {}
@@ -224,6 +239,9 @@ Difficulty: {difficulty}/10
 Training mode: {training_mode}
 Adaptive focus mode: {focus_mode}
 Domain focus: {domain_focus}
+Current interview phase: {phase_name}
+Phase objective: {phase_goal}
+Phase focus: {phase_focus}
 Last score: {last_score}/10
 Current focus area: {current_focus_area}
 
@@ -253,6 +271,7 @@ CANDIDATE ANSWER:
 
 FOLLOW-UP RULES:
 - Generate exactly ONE follow-up interviewer turn.
+- Every turn must include a follow-up behavior: challenge vague points or go deeper when strong.
 - Reference something the candidate just said or failed to say when useful.
 - If the candidate was vague, interrupt them explicitly and ask for specifics.
 - If the candidate was strong, increase depth with tradeoffs, constraints, edge cases, or decision-making.
@@ -288,6 +307,9 @@ OUTPUT FORMAT:
         conversation_history=_json_context(conversation_history[-8:]),
         last_score=last_score if last_score is not None else 5,
         current_focus_area=current_focus_area or "general depth",
+        phase_name=phase_name,
+        phase_goal=phase_goal or "Evaluate this phase deeply with realistic probing.",
+        phase_focus=phase_focus or "Evidence-backed answer quality",
     )
 
     return Task(

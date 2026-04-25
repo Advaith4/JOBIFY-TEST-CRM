@@ -645,6 +645,9 @@ def run_interview_start(
     interviewer_persona: dict | str | None = None,
     coach_memory: dict | None = None,
     domain_focus: str = "",
+    phase_name: str = "Introduction",
+    phase_goal: str = "",
+    phase_focus: str = "",
 ) -> dict:
     weak_areas = weak_areas or []
     agent = create_interviewer()
@@ -660,6 +663,9 @@ def run_interview_start(
         interviewer_persona=interviewer_persona or {},
         coach_memory=coach_memory or {},
         domain_focus=domain_focus,
+        phase_name=phase_name,
+        phase_goal=phase_goal,
+        phase_focus=phase_focus,
     )
     crew = Crew(agents=[agent], tasks=[task], verbose=False)
     result = crew.kickoff()
@@ -689,6 +695,9 @@ def run_interview_answer(
     domain_focus: str = "",
     conversation_history: list[dict] | None = None,
     current_focus_area: str = "",
+    phase_name: str = "Introduction",
+    phase_goal: str = "",
+    phase_focus: str = "",
 ) -> dict:
     weak_areas = weak_areas or []
     resume_context = resume_context or {}
@@ -754,6 +763,9 @@ def run_interview_answer(
             conversation_history=conversation_history,
             last_score=numeric_score,
             current_focus_area=current_focus_area or normalized_eval.get("next_focus", ""),
+            phase_name=phase_name,
+            phase_goal=phase_goal,
+            phase_focus=phase_focus,
         )
         c_f = Crew(agents=[ag_f], tasks=[t_f], verbose=False)
         raw_f = getattr(c_f.kickoff(), "raw", "").strip()

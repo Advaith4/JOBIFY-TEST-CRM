@@ -26,6 +26,59 @@ router = APIRouter(prefix="/api/interview", tags=["interview"])
 # In-memory state for active sessions (fast access during live interview)
 _sessions: dict[str, dict[str, Any]] = {}
 
+INTERVIEW_PHASES: list[dict[str, Any]] = [
+    {
+        "name": "Introduction",
+        "goal": "Set context, confirm target role fit, and establish communication baseline.",
+        "focus": "Candidate background, role motivation, and concise self-positioning.",
+        "min_turns": 1,
+    },
+    {
+        "name": "Resume Deep Dive",
+        "goal": "Validate resume claims with concrete examples and measurable outcomes.",
+        "focus": "Projects, ownership, decisions, and impact.",
+        "min_turns": 1,
+    },
+    {
+        "name": "Core Technical Round",
+        "goal": "Probe technical depth, tradeoffs, and implementation reasoning.",
+        "focus": "Architecture, debugging, APIs, data structures, and systems thinking.",
+        "min_turns": 2,
+    },
+    {
+        "name": "Problem Solving",
+        "goal": "Test structured thinking under constraints and ambiguity.",
+        "focus": "Approach, edge cases, complexity, and iterative refinement.",
+        "min_turns": 1,
+    },
+    {
+        "name": "Behavioral Round",
+        "goal": "Assess collaboration, ownership, conflict handling, and communication maturity.",
+        "focus": "STAR narratives with concrete outcomes.",
+        "min_turns": 1,
+    },
+    {
+        "name": "Pressure / Cross-questioning",
+        "goal": "Stress-test consistency, clarity, and defense of prior decisions.",
+        "focus": "Interruptions, pushback, and evidence-backed responses.",
+        "min_turns": 1,
+    },
+    {
+        "name": "Candidate Questions",
+        "goal": "Evaluate curiosity, role understanding, and decision criteria.",
+        "focus": "Questions about team, product, scope, and growth.",
+        "min_turns": 1,
+    },
+    {
+        "name": "Final Evaluation",
+        "goal": "Summarize performance, strengths, gaps, and next-step readiness.",
+        "focus": "Clear verdict and improvement plan.",
+        "min_turns": 0,
+    },
+]
+
+PHASE_SEQUENCE = [phase["name"] for phase in INTERVIEW_PHASES]
+
 TRAINING_MODES = {
     "adaptive": "Mix weak-area drilling with general role coverage.",
     "weak_area_only": "Spend every question on recurring weaknesses and low-scoring resume areas.",
@@ -123,6 +176,48 @@ def _question_mix_for_mode(training_mode: str) -> dict[str, float]:
     if training_mode == "behavioral_only":
         return {"weak_area": 0.0, "general": 0.0, "domain": 0.0, "behavioral": 1.0}
     return {"weak_area": 0.6, "general": 0.4, "domain": 0.0, "behavioral": 0.0}
+
+
+def _phase_meta(phase_name: str) -> dict[str, Any]:
+    for phase in INTERVIEW_PHASES:
+        if phase["name"] == phase_name:
+            return phase
+    return INTERVIEW_PHASES[0]
+
+
+def _phase_index(phase_name: str) -> int:
+    try:
+        return PHASE_SEQUENCE.index(phase_name)
+    except ValueError:
+        return 0
+
+
+def _pick_next_phase(current_phase: str, answer_count: int, avg_score: float | None = None) -> str:
+    idx = _phase_index(current_phase)
+    if current_phase == "Final Evaluation":
+        return "Final Evaluation"
+    if answer_count >= 8:
+        return "Final Evaluation"
+
+    # Adaptive pacing: if struggling, stay longer in technical/problem rounds before pressure.
+    if avg_score is not None and avg_score <= 4.5 and current_phase in {"Core Technical Round", "Problem Solving"}:
+        return current_phase
+    if avg_score is not None and avg_score >= 8.0 and current_phase == "Behavioral Round":
+        return "Pressure / Cross-questioning"
+
+    next_idx = min(idx + 1, len(PHASE_SEQUENCE) - 1)
+    return PHASE_SEQUENCE[next_idx]
+
+
+def _ensure_intro_question(question: str, role: str) -> str:
+    text = str(question or "").strip()
+    lowered = text.lower()
+    if "tell me about yourself" in lowered:
+        return text
+    return (
+        f"Tell me about yourself and why you're a good fit for this {role} role. "
+        "Keep it concise, specific, and grounded in your actual work."
+    )
 
 
 def _get_or_create_memory(db: Session, user_id: int) -> CareerCoachMemory:
@@ -570,6 +665,9 @@ def _state_from_record(rec: InterviewSession) -> dict[str, Any]:
     context = _safe_json_load(rec.personalization_context, {})
     if isinstance(context, dict) and context.get("interviewer_persona"):
         context["interviewer_persona"] = _normalize_persona(context.get("interviewer_persona"))
+    if isinstance(context, dict) and not context.get("current_phase"):
+        context["current_phase"] = "Introduction"
+        context["phase_history"] = context.get("phase_history") or ["Introduction"]
     msgs = _safe_json_load(rec.messages, [])
     last_ai = next((m["content"] for m in reversed(msgs) if m.get("role") == "ai"), "")
     return {
@@ -673,6 +771,8 @@ def start_interview(
         focus_mode = "behavioral_only"
     elif training_mode == "domain_specific":
         focus_mode = "domain_specific"
+    current_phase = "Introduction"
+    phase_details = _phase_meta(current_phase)
 
     try:
         from crew import run_interview_start
@@ -688,6 +788,9 @@ def start_interview(
             interviewer_persona=INTERVIEWER_PERSONAS[interviewer_persona],
             coach_memory=_memory_snapshot(memory),
             domain_focus=req.domain_focus,
+            phase_name=current_phase,
+            phase_goal=phase_details["goal"],
+            phase_focus=phase_details["focus"],
         )
         if not isinstance(first, dict):
             logger.warning("run_interview_start returned non-dict payload; using fallback question.")
@@ -695,7 +798,7 @@ def start_interview(
     except Exception as exc:
         logger.error("Manual interview start failed: %s", exc, exc_info=True)
         first = {
-            "question": f"Let's begin. In 5 to 10 lines, walk me through the experience that best proves you can handle a {req.role} role. Be specific about what you built, decided, and improved.",
+            "question": f"Tell me about yourself and why you're a good fit for this {req.role} role.",
             "focus_area": req.weak_areas[0] if req.weak_areas else "general role fit",
             "focus_type": focus_mode,
             "interviewer_signal": "I will challenge vague claims.",
@@ -704,6 +807,8 @@ def start_interview(
         }
 
     question = str(first.get("question") or "").strip()
+    if current_phase == "Introduction":
+        question = _ensure_intro_question(question, req.role)
     answer_expectation = str(first.get("answer_expectation") or "Answer in 5-10 lines with context, decisions, tradeoffs, and measurable outcome.").strip()
     focus_type = _normalize_focus_type(first.get("focus_type"), focus_mode)
     session_token = uuid.uuid4().hex
@@ -718,6 +823,7 @@ def start_interview(
         "interviewer_signal": first.get("interviewer_signal", ""),
         "pressure_level": first.get("pressure_level", INTERVIEWER_PERSONAS[interviewer_persona]["pressure"]),
         "answer_expectation": answer_expectation,
+        "phase": current_phase,
     }
     context = {
         "source": "manual",
@@ -734,6 +840,8 @@ def start_interview(
         "domain_focus": req.domain_focus,
         "coach_memory": _memory_snapshot(memory),
         "current_focus_area": first_msg["focus_area"],
+        "current_phase": current_phase,
+        "phase_history": [current_phase],
     }
     db_session = None
     if current_user is not None:
@@ -788,6 +896,8 @@ def start_interview(
         "persona": persona_profile,
         "coach_memory": context["coach_memory"],
         "session_intro": session_intro,
+        "phase": current_phase,
+        "phase_goal": phase_details["goal"],
     }
 
 
@@ -833,6 +943,8 @@ def start_interview_from_resume(
         focus_mode = "behavioral_only"
     elif training_mode == "domain_specific":
         focus_mode = "domain_specific"
+    current_phase = "Introduction"
+    phase_details = _phase_meta(current_phase)
 
     try:
         from crew import run_interview_start
@@ -847,6 +959,9 @@ def start_interview_from_resume(
             interviewer_persona=INTERVIEWER_PERSONAS[interviewer_persona],
             coach_memory=context["coach_memory"],
             domain_focus=context["domain_focus"],
+            phase_name=current_phase,
+            phase_goal=phase_details["goal"],
+            phase_focus=phase_details["focus"],
         )
         if not isinstance(first, dict):
             logger.warning("run_interview_start returned non-dict payload for resume-aware start; using fallback.")
@@ -854,7 +969,7 @@ def start_interview_from_resume(
     except Exception as exc:
         logger.error("Resume-aware interview start failed: %s", exc, exc_info=True)
         first = {
-            "question": f"Let's start with your resume. In 5 to 10 lines, which part of your {role} experience best proves you can do this job? Be precise about the decision you made, the technical detail that mattered, and the result.",
+            "question": f"Tell me about yourself and why you're a good fit for this {role} role.",
             "focus_area": context["weak_areas"][0] if context["weak_areas"] else "general resume walkthrough",
             "focus_type": focus_mode,
             "interviewer_signal": "I will press for evidence, not generic claims.",
@@ -863,10 +978,14 @@ def start_interview_from_resume(
         }
 
     question = str(first.get("question") or "Tell me about your most relevant project and what you would improve.").strip()
+    if current_phase == "Introduction":
+        question = _ensure_intro_question(question, role)
     answer_expectation = str(first.get("answer_expectation") or "Answer in 5-10 lines with context, decisions, tradeoffs, and measurable outcome.").strip()
     focus_type = _normalize_focus_type(first.get("focus_type"), focus_mode)
     context["focus_counts"][focus_type] = context["focus_counts"].get(focus_type, 0) + 1
     context["current_focus_area"] = first.get("focus_area", context["weak_areas"][0] if context["weak_areas"] else "general")
+    context["current_phase"] = current_phase
+    context["phase_history"] = [current_phase]
 
     session_token = uuid.uuid4().hex
     first_msg = {
@@ -879,6 +998,7 @@ def start_interview_from_resume(
         "interviewer_signal": first.get("interviewer_signal", ""),
         "pressure_level": first.get("pressure_level", INTERVIEWER_PERSONAS[interviewer_persona]["pressure"]),
         "answer_expectation": answer_expectation,
+        "phase": current_phase,
     }
     db_session = InterviewSession(
         user_id=current_user.id,
@@ -938,6 +1058,8 @@ def start_interview_from_resume(
         "persona": persona_profile,
         "coach_memory": context["coach_memory"],
         "session_intro": session_intro,
+        "phase": current_phase,
+        "phase_goal": phase_details["goal"],
     }
 
 
@@ -963,6 +1085,8 @@ def submit_answer(
 
     focus_mode = _choose_focus_mode(state)
     context = state.get("personalization_context") or {}
+    current_phase = context.get("current_phase", "Introduction")
+    phase_details = _phase_meta(current_phase)
     try:
         from crew import run_interview_answer
         result = run_interview_answer(
@@ -983,6 +1107,9 @@ def submit_answer(
             domain_focus=context.get("domain_focus", ""),
             conversation_history=state.get("messages", [])[-8:],
             current_focus_area=context.get("current_focus_area", ""),
+            phase_name=current_phase,
+            phase_goal=phase_details["goal"],
+            phase_focus=phase_details["focus"],
         )
         if not isinstance(result, dict):
             logger.warning("run_interview_answer returned non-dict payload; using safe fallback.")
@@ -1000,6 +1127,7 @@ def submit_answer(
     except (TypeError, ValueError):
         score = 5
     state["scores"].append(score)
+    avg = sum(state["scores"]) / len(state["scores"]) if state["scores"] else None
 
     new_diff = result.get("new_difficulty", state["difficulty"])
     try:
@@ -1016,6 +1144,14 @@ def submit_answer(
     context["difficulty"] = state["difficulty"]
     context["last_score"] = score
     context["last_adaptive_mode"] = result.get("adaptive_mode", focus_mode)
+    next_phase = _pick_next_phase(current_phase, len(state["answers"]), avg)
+    context["current_phase"] = next_phase
+    phase_history = context.get("phase_history") or []
+    if not phase_history:
+        phase_history = [current_phase]
+    if phase_history[-1] != next_phase:
+        phase_history.append(next_phase)
+    context["phase_history"] = phase_history
     state["personalization_context"] = context
 
     now = datetime.utcnow().isoformat()
@@ -1044,10 +1180,10 @@ def submit_answer(
         "interviewer_signal": result.get("interviewer_signal", ""),
         "pressure_level": result.get("pressure_level", INTERVIEWER_PERSONAS.get(context.get("interviewer_persona", "balanced"), INTERVIEWER_PERSONAS["balanced"]).get("pressure", "medium")),
         "answer_expectation": result.get("answer_expectation", ""),
+        "phase": next_phase,
         "timestamp": now,
     })
 
-    avg = sum(state["scores"]) / len(state["scores"]) if state["scores"] else None
     if current_user is not None:
         memory = _update_coach_memory(db, current_user.id, state, score)
         context["coach_memory"] = _memory_snapshot(memory)
@@ -1073,6 +1209,17 @@ def submit_answer(
     except Exception:
         final_verdict = None
 
+    final_feedback = None
+    if next_phase == "Final Evaluation":
+        final_feedback = {
+            "overall_score": round(avg, 2) if avg is not None else score,
+            "strengths": normalized_eval.get("what_went_well", [])[:3],
+            "weaknesses": normalized_eval.get("what_was_missing", [])[:3],
+            "improvement_plan": normalized_eval.get("how_to_improve", [])[:3],
+            "verdict": final_verdict,
+            "verdict_explanation": verdict_explanation,
+        }
+
     return {
         **result,
         "evaluation": normalized_eval,
@@ -1090,6 +1237,12 @@ def submit_answer(
         "session_turn": len(state["answers"]),
         "coach_memory": context["coach_memory"],
         "avg_score": avg,
+        "phase": next_phase,
+        "phase_goal": _phase_meta(next_phase)["goal"],
+        "phase_focus": _phase_meta(next_phase)["focus"],
+        "phase_history": context.get("phase_history", [next_phase]),
+        "interview_complete": next_phase == "Final Evaluation",
+        "final_feedback": final_feedback,
         "final_verdict": final_verdict,
         "verdict_explanation": verdict_explanation,
     }
