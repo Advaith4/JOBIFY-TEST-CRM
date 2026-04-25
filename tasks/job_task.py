@@ -1,70 +1,41 @@
 """
-job_task.py – CrewAI task definitions for the Hybrid RAG job pipeline.
+job_task.py - CrewAI task definitions for the hybrid RAG job pipeline.
 
-Phase 1: Role inference  → LLM reads resume, returns best-fit roles as JSON.
-Phase 2: RAG ranking     → LLM receives REAL fetched jobs, returns ranked TOP-5 JSON.
-                           LLM NEVER generates job data; it only filters/ranks.
+Phase 1: role inference -> identify realistic adjacent role targets.
+Phase 2: ranking -> score and explain only REAL fetched jobs.
 """
+
 import json
+
 from crewai import Task
 
 
-def create_role_inference_task(agent, resume_content: str) -> Task:
-    """
-    Phase 1: Identify the candidate's primary domain and 5 best-fit roles.
-    """
+def create_role_inference_task(agent, resume_content: str, profile_context: dict | None = None) -> Task:
+    """Phase 1: identify a realistic and diverse role mix."""
+    profile_context = profile_context or {}
     description = (
-        "Analyze the resume below and identify the 5 best entry-level / internship "
-        "job roles for this candidate.\n\n"
-
+        "You are Jobify's AI career coach. Analyze the candidate profile and select the 5 most realistic roles "
+        "they should target right now.\n\n"
         "CANDIDATE RESUME:\n"
         "---------------------\n"
         f"{resume_content[:2000]}\n"
         "---------------------\n\n"
-
-        "STEP 1 — Find the PRIMARY DOMAIN:\n"
-        "Look at the candidate's projects (most important), skills, and experience. "
-        "Identify their single dominant domain, for example:\n"
-        "  • Mobile (Flutter, Android, iOS, React Native)\n"
-        "  • Web Frontend (React, Vue, Angular, Next.js)\n"
-        "  • Web Backend (Node.js, Django, FastAPI, Spring)\n"
-        "  • Data / ML (Python, TensorFlow, scikit-learn, pandas)\n"
-        "  • DevOps / Cloud (AWS, Docker, Kubernetes)\n\n"
-
-        "STEP 2 — Suggest 5 roles WITHIN that domain ONLY:\n"
-        "All 5 roles must use the candidate's primary tech stack. "
-        "DO NOT cross domains. For example: if Flutter/mobile is primary, "
-        "suggest ONLY mobile roles (Flutter Developer, Mobile App Developer, "
-        "Cross-Platform Developer, Android Developer, React Native Developer). "
-        "NEVER suggest Data Scientist, ML Engineer, DB Developer, or UI/UX "
-        "unless those are clearly the candidate's primary domain.\n\n"
-
-        "STEP 3 — ENSURE ROLE DIVERSITY INSIDE THE SAME DOMAIN:\n"
-        "The 5 roles must be DISTINCT adjacent targets, not the same title repeated "
-        "with tiny wording changes. Avoid outputs like 'Junior Python Developer', "
-        "'Python Developer Intern', and 'Python Developer Fresher' together unless "
-        "there are no other realistic adjacent roles. Prefer nearby but distinct "
-        "titles such as backend, API, software engineer, platform, web, mobile, "
-        "or cross-platform roles when they still fit the same stack.\n\n"
-
-        "Examples:\n"
-        "  • Backend/Python domain: Junior Python Developer, Backend Developer Intern, "
-        "API Developer Intern, Django/FastAPI Developer Intern, Software Engineer Intern\n"
-        "  • Web frontend domain: Junior Frontend Developer, React Developer Intern, "
-        "UI Engineer Intern, Web Developer Intern, JavaScript Developer Intern\n"
-        "  • Mobile domain: Junior Flutter Developer, Mobile App Developer Intern, "
-        "Cross-Platform Developer Intern, Android Developer Intern, React Native Developer Intern\n\n"
-
-        "Return ONLY valid JSON (no extra text):\n"
-        '{"roles": ["Role 1", "Role 2", "Role 3", "Role 4", "Role 5"]}\n\n'
-
-        "Rules:\n"
-        "- Entry-level, junior, or internship only\n"
-        "- Be specific (e.g. 'Junior Flutter Developer', not just 'Developer')\n"
-        "- All 5 roles within the same primary domain\n"
-        "- All 5 roles must be distinct base titles, not near-duplicates\n"
-        "- No senior or lead positions\n"
-        "- Valid JSON only, no markdown"
+        "PROFILE CONTEXT:\n"
+        "---------------------\n"
+        f"{json.dumps(profile_context, ensure_ascii=False)}\n"
+        "---------------------\n\n"
+        "ROLE SELECTION RULES:\n"
+        "- Use resume strengths, project evidence, skills, and weak signals together.\n"
+        "- Pick entry-level, junior, or internship roles only.\n"
+        "- Create variation across 2-3 adjacent title families when justified.\n"
+        "- Avoid duplicates that are the same role with tiny wording changes.\n"
+        "- Prefer roles that would lead to distinct live job searches.\n"
+        "- Mix safer and slightly stretch roles if the resume supports it.\n"
+        "- Example for a data-heavy profile: Data Analyst, Junior Data Scientist, ML Engineer Intern.\n"
+        "- Example for a backend-heavy profile: Backend Engineer, API Developer, Platform Engineer Intern.\n"
+        "- No senior, lead, architect, or staff roles.\n\n"
+        "Return ONLY valid JSON:\n"
+        '{"roles": ["Role 1", "Role 2", "Role 3", "Role 4", "Role 5"]}'
     )
 
     return Task(
@@ -74,96 +45,89 @@ def create_role_inference_task(agent, resume_content: str) -> Task:
     )
 
 
-def create_job_ranking_task(agent, resume_content: str, real_jobs: list[dict]) -> Task:
-    """
-    Phase 2 — Hybrid RAG Ranking Task.
-
-    The LLM receives a curated list of REAL jobs fetched from JSearch API.
-    Its ONLY job is to select and rank the TOP 5 most relevant ones.
-    It must NOT invent new jobs, modify URLs, or add jobs not in the list.
-
-    real_jobs: list of {title, company, url, location, description}
-    """
-    # Serialize real jobs into a compact numbered block for the prompt.
-    # Cap at 10 jobs and 250-char descriptions to stay inside Groq's 6000 TPM free-tier limit.
+def create_job_ranking_task(
+    agent,
+    resume_content: str,
+    real_jobs: list[dict],
+    profile_context: dict | None = None,
+) -> Task:
+    """Phase 2: rank only fetched jobs and explain fit, gaps, and next steps."""
+    profile_context = profile_context or {}
     capped_jobs = real_jobs[:10]
     jobs_block_lines = []
     for i, job in enumerate(capped_jobs, start=1):
-        desc = (job.get('description') or '')[:250].replace('\n', ' ')
+        desc = (job.get("description") or "")[:220].replace("\n", " ")
         jobs_block_lines.append(
             f"[{i}] title: {job.get('title', '')} | company: {job.get('company', '')} "
             f"| location: {job.get('location', '')} | url: {job.get('url', '')} "
-            f"| desc: {desc}"
+            f"| source_role: {job.get('source_role', '')} | desc: {desc}"
         )
     jobs_block = "\n".join(jobs_block_lines) if jobs_block_lines else "(No jobs fetched)"
 
     description = (
-        "You are a job recommendation engine operating in STRICT RAG mode.\n\n"
-
-        "═══════════════════════════════════════════════════════\n"
-        "⚠️  CRITICAL RULES — READ BEFORE ANYTHING ELSE:\n"
-        "  1. You MUST only use jobs from the REAL JOB LISTINGS section below.\n"
-        "  2. You MUST NEVER invent, create, or hallucinate any job.\n"
-        "  3. You MUST copy the 'url' field EXACTLY as given — do NOT modify it.\n"
-        "  4. You MUST return ONLY valid JSON — no markdown, no prose.\n"
-        "  5. If fewer than 5 real jobs are relevant, return only those that are.\n"
-        "═══════════════════════════════════════════════════════\n\n"
-
+        "You are Jobify's personalized job recommendation engine operating in STRICT RAG mode.\n\n"
+        "CRITICAL RULES:\n"
+        "1. You MUST only use jobs from the REAL JOB LISTINGS section below.\n"
+        "2. You MUST NEVER invent or hallucinate any job.\n"
+        "3. You MUST copy the url field EXACTLY as given.\n"
+        "4. You MUST return ONLY valid JSON.\n"
+        "5. If fewer than 5 jobs are relevant, return only those.\n\n"
         "CANDIDATE RESUME:\n"
         "---------------------\n"
-        f"{resume_content[:1500]}\n"
+        f"{resume_content[:1400]}\n"
         "---------------------\n\n"
-
-        "REAL JOB LISTINGS (fetched live from JSearch API — these are the ONLY valid jobs):\n"
-        "─────────────────────────────────────────────────────────────────────────────────\n"
+        "PROFILE CONTEXT:\n"
+        "---------------------\n"
+        f"{json.dumps(profile_context, ensure_ascii=False)}\n"
+        "---------------------\n\n"
+        "REAL JOB LISTINGS:\n"
+        "---------------------\n"
         f"{jobs_block}\n"
-        "─────────────────────────────────────────────────────────────────────────────────\n\n"
-
+        "---------------------\n\n"
         "YOUR TASK:\n"
-        "Select the TOP 5 most relevant jobs from the list above for this candidate.\n"
-        "Prefer TITLE DIVERSITY when match quality is similar. If two jobs are both strong "
-        "but essentially the same role title, keep the better one and use another strong "
-        "job with a different title family when available.\n"
+        "Select the TOP 5 most relevant jobs from the list above.\n"
+        "Prefer role diversity when match quality is similar. If two jobs are strong but nearly the same role family, "
+        "keep the better one and use another strong job from a different family when available.\n"
         "For each selected job:\n"
-        "  - Copy title, company, url, location EXACTLY as shown above.\n"
-        "  - Write a 'reason' (1-2 sentences) explaining WHY this specific job "
-        "fits this specific candidate's skills and experience.\n"
-        "  - Compute 'match_score' (integer 0-100) based on how well the candidate's "
-        "skills align with the job description. Be honest and precise.\n"
-        "  - List 'matched_skills': skills from the resume that match this job.\n"
-        "  - List 'missing_skills': skills the job requires that are NOT in the resume.\n\n"
-
-        "REQUIRED OUTPUT FORMAT (strict JSON only — no text before or after):\n"
+        "- Copy title, company, url, and location EXACTLY as shown above.\n"
+        "- Write why_match: 1-2 sentences explaining why this specific role fits the candidate.\n"
+        "- Write gap_summary: 1 short sentence describing what the candidate lacks or has not clearly proven yet.\n"
+        "- Write improvement_plan: 1 short sentence telling the candidate how to close that gap.\n"
+        "- Compute match_score as an integer from 0 to 100.\n"
+        "- List matched_skills from the resume that clearly align.\n"
+        "- List missing_skills that seem necessary but are not clearly shown.\n"
+        "- Set fit_bucket to one of: strong, close, stretch.\n\n"
+        "REQUIRED OUTPUT FORMAT:\n"
         "{\n"
         '  "suggested_roles": ["role1", "role2"],\n'
         '  "jobs": [\n'
         '    {\n'
         '      "role": "exact title from listing above",\n'
         '      "company": "exact company from listing above",\n'
-        '      "link": "exact url from listing above — do NOT change",\n'
+        '      "link": "exact url from listing above",\n'
         '      "location": "exact location from listing above",\n'
-        '      "reason": "why this job fits this candidate",\n'
+        '      "why_match": "why this job fits this candidate",\n'
+        '      "gap_summary": "what the candidate lacks or has not proven yet",\n'
+        '      "improvement_plan": "how the candidate should improve",\n'
         '      "matched_skills": ["skill1", "skill2"],\n'
         '      "missing_skills": ["skill3"],\n'
-        '      "match_score": 78\n'
+        '      "match_score": 78,\n'
+        '      "fit_bucket": "close"\n'
         '    }\n'
         '  ]\n'
         "}\n\n"
-
-        "VALIDATION CHECKLIST (enforce before responding):\n"
-        "  ✅ Every url/link value is copied verbatim from the listing\n"
-        "  ✅ No job exists in output that wasn't in the listing above\n"
-        "  ✅ match_score is an integer between 0 and 100\n"
-        "  ✅ Output is valid JSON with double quotes, no trailing commas\n"
-        "  ✅ 'reason' field is present for every job"
+        "VALIDATION CHECKLIST:\n"
+        "- Every link is copied verbatim from the listing.\n"
+        "- No output job exists outside the listing above.\n"
+        "- match_score is an integer between 0 and 100.\n"
+        "- why_match, gap_summary, and improvement_plan exist for every job."
     )
 
     return Task(
         description=description,
         expected_output=(
-            "Valid JSON with suggested_roles and up to 5 jobs. Each job has: "
-            "role, company, link (verbatim from API), location, reason, "
-            "matched_skills, missing_skills, match_score (integer)."
+            "Valid JSON with suggested_roles and up to 5 jobs. Each job has role, company, link, location, "
+            "why_match, gap_summary, improvement_plan, matched_skills, missing_skills, match_score, and fit_bucket."
         ),
         agent=agent,
     )

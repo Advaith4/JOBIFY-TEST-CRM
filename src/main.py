@@ -10,13 +10,26 @@ Docker:
 import logging
 import os
 import sys
-import io
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-# Force UTF-8 output on Windows to prevent emoji/unicode crashes
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+
+def _configure_console_encoding() -> None:
+    """
+    Prefer UTF-8 output on Windows without replacing pytest/stdout capture objects.
+    Reconfiguring the existing streams avoids teardown errors during test runs.
+    """
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except (ValueError, OSError):
+                continue
+
+
+_configure_console_encoding()
 
 
 def _disable_broken_local_proxies() -> None:

@@ -2,7 +2,7 @@ import json
 
 from crewai import Task
 
-# Legacy implementation for /api/analyze UI
+
 def create_interview_task(agent, resume_content):
     description = """
 You are an Interview Coach.
@@ -32,8 +32,9 @@ OUTPUT FORMAT (STRICT JSON ONLY):
     return Task(
         description=description,
         expected_output="Valid JSON containing exactly 4 interview questions with tips.",
-        agent=agent
+        agent=agent,
     )
+
 
 def _json_context(value):
     return json.dumps(value if value is not None else {}, ensure_ascii=False, indent=2)
@@ -59,12 +60,12 @@ def create_interview_start_task(
     coach_memory = coach_memory or {}
 
     description = """
-You are a real interviewer and personal coach combined into one system.
-The candidate is applying for the role: {role}.
-The current difficulty level is {difficulty}/10.
-Training mode: {training_mode}.
-Domain focus: {domain_focus}.
-Current requested focus mode: {focus_mode}.
+You are a realistic interviewer and career coach running a live interview.
+Candidate role target: {role}
+Difficulty: {difficulty}/10
+Training mode: {training_mode}
+Domain focus: {domain_focus}
+Requested focus mode: {focus_mode}
 
 INTERVIEWER PERSONA:
 {interviewer_persona}
@@ -81,38 +82,33 @@ SECTION SCORES:
 RESUME CONTEXT:
 {resume_context}
 
-QUESTION MIX POLICY:
-- Across the session, approximately 60% of questions must target weak areas from Resume Lab.
-- Approximately 40% should test general role-critical knowledge.
-- If training mode is weak_area_only, ask only from weak areas.
-- If training mode is domain_specific, prioritize domain_focus and role-specific depth.
-- If training mode is behavioral_only, ask behavioral/leadership/communication questions only.
+INTERVIEW RULES:
+- Ask exactly ONE question, but make it feel like a real interviewer turn.
+- The question must be detailed and specific, not generic.
+- If focus_mode is weak_area, anchor the question to a weak area or low-scoring section.
+- If focus_mode is domain_specific, prioritize domain_focus and technical depth.
+- If focus_mode is behavioral_only, ask a behavioral question tied to real resume evidence.
+- If difficulty is 7-10, press on tradeoffs, architecture, or edge cases.
+- If difficulty is 4-6, ask a practical scenario or implementation question.
+- If difficulty is 1-3, ask a foundational conceptual or behavioral question.
+- You may apply realistic pressure with phrases like "Let me stop you there" or "Be specific here".
+- Do not invent projects, tools, or achievements not present in the provided context.
 
-Generate exactly ONE targeted interview question for this candidate.
-If focus mode is "weak_area", ask about a real weak area or low-scoring section from the resume.
-If focus mode is "domain_specific", ask a realistic domain-specific question.
-If focus mode is "behavioral_only", ask a behavioral question tied to their resume.
-If focus mode is "general", ask a role-critical question that still fits the candidate's background.
-If the difficulty is high (7-10), make it a system design or deep architectural question.
-If the difficulty is medium (4-6), make it a practical coding or scenario question.
-If the difficulty is low (1-3), make it a basic conceptual or behavioral question.
-Do not invent experience. If referencing resume content, use only the provided resume context.
+STYLE RULES:
+- Make the interviewer sound human, direct, and emotionally believable.
+- Include enough context so the candidate knows what level of detail is expected.
+- Return a question that would naturally lead to a 5-10 line answer.
 
-HUMAN-LIKE INTERVIEW BEHAVIOR:
-- Use a natural conversational tone matching the interviewer persona.
-- You may briefly interrupt or add pressure only as text, e.g. "I'll pause you there..." or "Be specific here..."
-- Ask one question only, but make it feel like a real interviewer setting expectations.
-- Include the reason for the question internally in JSON fields, not as extra prose outside JSON.
+Return ONLY JSON.
 
-Return ONLY JSON. Do not include any extra text.
-
-OUTPUT FORMAT (STRICT JSON ONLY):
+OUTPUT FORMAT:
 {{
-  "question": "The interview question string",
+  "question": "2-4 sentence interviewer turn with the actual question and realistic pressure",
   "focus_area": "specific weak area or general competency",
   "focus_type": "weak_area, general, domain, or behavioral",
-  "interviewer_signal": "short realistic cue such as 'I will press for specifics here'",
-  "pressure_level": "low, medium, or high"
+  "interviewer_signal": "short realistic cue such as 'I will challenge vague claims here'",
+  "pressure_level": "low, medium, or high",
+  "answer_expectation": "short guidance on how the candidate should answer"
 }}
 """.format(
         role=role,
@@ -129,43 +125,72 @@ OUTPUT FORMAT (STRICT JSON ONLY):
 
     return Task(
         description=description,
-        expected_output="Valid JSON with a single interview question.",
-        agent=agent
+        expected_output="Valid JSON with a single realistic interview opening turn.",
+        agent=agent,
     )
 
-def create_evaluator_task(agent, question, answer):
-    description = """
-You are the Evaluator.
-Review the candidate's answer to the following question:
 
-Question: {question}
-Candidate Answer: {answer}
+def create_evaluator_task(
+    agent,
+    question,
+    answer,
+    conversation_history=None,
+    focus_area="",
+    interviewer_persona=None,
+):
+    conversation_history = conversation_history or []
+    interviewer_persona = interviewer_persona or {}
+    description = f"""
+You are the evaluator for a live mock interview. Evaluate the CANDIDATE ANSWER specifically against the QUESTION and RECENT CONVERSATION HISTORY. Be concrete and avoid generic, templated language.
 
-Provide a strict score from 1 to 10. 
-CRITICAL RULES FOR SCORING:
-- If the question asked for code or steps and the answer is just one sentence, MAXIMUM score is 4.
-- If the candidate says "I don't know", the score MUST be 1 or 2.
-- Only award 8-10 for comprehensive, technically accurate, and well-structured answers.
+INTERVIEWER PERSONA:
+{interviewer_persona}
 
-List strengths (if any), weaknesses, and a concrete suggestion for improvement.
+CURRENT FOCUS AREA:
+{focus_area}
 
-Return ONLY JSON. Do not include any extra text.
+RECENT CONVERSATION HISTORY (most recent items):
+{conversation_history}
 
-OUTPUT FORMAT (STRICT JSON ONLY):
+QUESTION:
+{question}
+
+CANDIDATE ANSWER:
+{answer}
+
+STRICT INSTRUCTIONS (MUST FOLLOW):
+- Return ONLY valid JSON matching the exact schema below. Do not include any extra text, commentary, or explanation.
+- All array fields must contain at least 3 concise, specific items. If fewer than 3 real observations exist, synthesize additional precise suggestions tied to the candidate's answer (not generic filler).
+- Use specific examples drawn from the provided answer where possible.
+- Avoid phrases like "good job", "try to be more specific", or any vague stock feedback.
+
+REQUIRED OUTPUT SCHEMA (STRICT JSON ONLY):
 {{
-  "score": 8,
-  "technical_depth": 7,
-  "communication": 8,
-  "missing_concepts": ["concept 1", "concept 2"],
-  "improvement": "Concrete suggestion here."
+    "score": number,                   // 0-10 integer; overall quality of this answer
+    "confidence": number,              // 0-10 integer; evaluator confidence in this judgment
+    "what_went_well": ["str"],       // min 3 short strings, specific strengths tied to the answer
+    "what_was_missing": ["str"],     // min 3 short strings, concrete missing elements or weaknesses
+    "how_to_improve": ["str"],       // min 3 short action-oriented suggestions (brief)
+    "next_focus": "str",             // one concise focus for the candidate's next answer
+    "final_verdict": "Not Ready" | "Borderline" | "Ready",
+    "verdict_explanation": "str"     // 1-2 sentences explaining the verdict
 }}
-""".format(question=question, answer=answer)
+
+Be brief but specific in each array entry. Tailor every item to the candidate's answer.
+""".format(
+                interviewer_persona=_json_context(interviewer_persona),
+                focus_area=focus_area or "general depth",
+                conversation_history=_json_context(conversation_history[-6:]),
+                question=question,
+                answer=answer,
+        )
 
     return Task(
         description=description,
-        expected_output="Valid JSON with score, strengths, weaknesses, and improvements.",
-        agent=agent
+        expected_output="Valid JSON with a strict interview evaluation.",
+        agent=agent,
     )
+
 
 def create_followup_task(
     agent,
@@ -181,19 +206,26 @@ def create_followup_task(
     interviewer_persona=None,
     coach_memory=None,
     domain_focus="",
+    conversation_history=None,
+    last_score=None,
+    current_focus_area="",
 ):
     weak_areas = weak_areas or []
     resume_context = resume_context or {}
     section_scores = section_scores or {}
     interviewer_persona = interviewer_persona or {}
     coach_memory = coach_memory or {}
+    conversation_history = conversation_history or []
+
     description = """
-You are the Follow-up Interviewer for a realistic AI career coach.
-Role: {role}.
-Difficulty: {difficulty}/10.
-Training mode: {training_mode}.
-Adaptive focus mode: {focus_mode}.
-Domain focus: {domain_focus}.
+You are the follow-up interviewer for a realistic AI career coach.
+Role: {role}
+Difficulty: {difficulty}/10
+Training mode: {training_mode}
+Adaptive focus mode: {focus_mode}
+Domain focus: {domain_focus}
+Last score: {last_score}/10
+Current focus area: {current_focus_area}
 
 INTERVIEWER PERSONA:
 {interviewer_persona}
@@ -210,27 +242,35 @@ SECTION SCORES:
 RESUME CONTEXT:
 {resume_context}
 
-Question Asked: {question}
-Candidate Answer: {answer}
+RECENT CONVERSATION HISTORY:
+{conversation_history}
 
-Based on the answer, generate exactly ONE follow-up question. 
-- If the candidate gave a strong answer, increase depth and connect it to a resume weak area or a realistic job constraint.
-- If the candidate struggled or said "I don't know", simplify and ask a more fundamental question about the weak topic.
-- Preserve the 60/40 policy: 60% weak-area training, 40% general role coverage.
-- Respect training mode: weak_area_only, domain_specific, behavioral_only, or adaptive.
-- Use long-term memory to revisit recurring weak areas if relevant.
-- Use human-like interviewer pressure. You may briefly interrupt: "Let me stop you there..." or "Give me a concrete example."
-- Do not invent projects, tools, or achievements not present in the resume context.
+LAST QUESTION:
+{question}
 
-Return ONLY JSON. Do not include any extra text.
+CANDIDATE ANSWER:
+{answer}
 
-OUTPUT FORMAT (STRICT JSON ONLY):
+FOLLOW-UP RULES:
+- Generate exactly ONE follow-up interviewer turn.
+- Reference something the candidate just said or failed to say when useful.
+- If the candidate was vague, interrupt them explicitly and ask for specifics.
+- If the candidate was strong, increase depth with tradeoffs, constraints, edge cases, or decision-making.
+- Respect training mode and focus mode.
+- Use weak areas and coach memory when relevant.
+- Do not invent experience not present in the resume context.
+- The follow-up should naturally demand a 5-10 line answer.
+
+Return ONLY JSON.
+
+OUTPUT FORMAT:
 {{
-  "question": "The follow-up interview question string",
+  "question": "2-4 sentence follow-up interviewer turn with realistic pressure",
   "focus_area": "specific weak area or general competency",
   "focus_type": "weak_area, general, domain, or behavioral",
-  "interviewer_signal": "short realistic cue or coaching pressure",
-  "pressure_level": "low, medium, or high"
+  "interviewer_signal": "short realistic cue or pressure statement",
+  "pressure_level": "low, medium, or high",
+  "answer_expectation": "short guidance on how the candidate should answer"
 }}
 """.format(
         role=role,
@@ -245,13 +285,17 @@ OUTPUT FORMAT (STRICT JSON ONLY):
         interviewer_persona=_json_context(interviewer_persona),
         coach_memory=_json_context(coach_memory),
         domain_focus=domain_focus or "role fundamentals",
+        conversation_history=_json_context(conversation_history[-8:]),
+        last_score=last_score if last_score is not None else 5,
+        current_focus_area=current_focus_area or "general depth",
     )
 
     return Task(
         description=description,
-        expected_output="Valid JSON with a single follow-up question.",
-        agent=agent
+        expected_output="Valid JSON with a single realistic follow-up interviewer turn.",
+        agent=agent,
     )
+
 
 def create_difficulty_task(agent, current_difficulty, score):
     description = """
@@ -277,5 +321,5 @@ OUTPUT FORMAT (STRICT JSON ONLY):
     return Task(
         description=description,
         expected_output="Valid JSON with the new integer difficulty.",
-        agent=agent
+        agent=agent,
     )

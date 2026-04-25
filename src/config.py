@@ -1,8 +1,9 @@
-import os
 from pydantic import field_validator
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="allow")
+
     # --- App ---
     APP_NAME: str = "Jobify AI CRM"
     DEBUG: bool = False
@@ -23,10 +24,6 @@ class Settings(BaseSettings):
 
     # --- CORS ---
     ALLOWED_ORIGINS: list[str] = ["http://localhost:8000", "http://127.0.0.1:8000"]
-
-    class Config:
-        env_file = ".env"
-        extra = "allow"
 
     @field_validator("DEBUG", mode="before")
     @classmethod

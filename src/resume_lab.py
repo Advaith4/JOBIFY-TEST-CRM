@@ -1,6 +1,7 @@
 import hashlib
 import json
 import re
+from functools import lru_cache
 from datetime import datetime
 from typing import Any, Literal
 
@@ -34,6 +35,88 @@ COMMON_SKILLS = {
     "deep learning", "nlp", "llm", "rag", "tensorflow", "pytorch", "html", "css",
     "tailwind", "bootstrap", "rest api", "graphql", "supabase", "figma",
 }
+
+SEGMENT_ACRONYMS = {
+    "ai": "AI",
+    "api": "API",
+    "apis": "APIs",
+    "aws": "AWS",
+    "css": "CSS",
+    "cv": "CV",
+    "db": "DB",
+    "gpa": "GPA",
+    "html": "HTML",
+    "ios": "iOS",
+    "java": "Java",
+    "js": "JS",
+    "json": "JSON",
+    "llm": "LLM",
+    "ml": "ML",
+    "nlp": "NLP",
+    "oop": "OOP",
+    "python": "Python",
+    "rag": "RAG",
+    "react": "React",
+    "rest": "REST",
+    "sql": "SQL",
+    "ui": "UI",
+    "ux": "UX",
+}
+
+EXTRA_RESUME_WORDS = {
+    "a", "ability", "able", "about", "across", "agent", "agents", "analysis", "analyzer", "analyzers",
+    "add", "and", "app", "apps", "application", "applications", "architected", "architecture", "automation",
+    "backend", "based", "best", "build", "building", "candidate", "chatbot", "chatbots", "clear",
+    "client", "clients", "cloud", "clean", "code", "coding", "collaboration", "collaborative", "computer", "confidence",
+    "coursework", "current", "data", "database", "databases", "debugging", "decision", "deep",
+    "deliver", "delivery", "demonstrated", "design", "designed", "developer", "developers", "development",
+    "detected", "driven", "education", "efficient", "engineer", "engineering", "experience", "fast", "feedback",
+    "final", "focus", "focused", "for", "foundation", "foundations", "framework", "frameworks", "frontend", "functional",
+    "functionalities", "general", "generative", "growth", "impact", "improved", "improvement", "in",
+    "integrate", "integrated", "intelligence", "intelligent", "intern", "internship", "job", "jobs",
+    "keyword", "keywords",
+    "knowledge", "language", "large", "learning", "maintainable", "management", "metrics", "model",
+    "models", "multi", "of", "on", "or", "platform", "platforms", "portfolio", "possesses", "problem", "problems",
+    "problem-solving", "process", "product", "profile", "programming", "project", "projects", "quality",
+    "readable", "real", "recruiter", "resume", "role", "scalable", "science", "search", "second",
+    "section", "skills", "skilled", "software", "solutions", "solving", "stack", "storytelling", "strategic", "strong",
+    "strongest", "student", "students", "structure", "structures", "summary", "system", "systems", "technical",
+    "technology", "technologies", "test", "testing", "the", "third", "to", "tools", "using", "web", "which", "with",
+    "work", "worked", "working", "workflow", "year", "your",
+}
+
+
+def _build_resume_word_lexicon() -> frozenset[str]:
+    words: set[str] = set(EXTRA_RESUME_WORDS) | set(SEGMENT_ACRONYMS)
+
+    for aliases in SECTION_ALIASES.values():
+        for alias in aliases:
+            for part in re.split(r"[\s/&+_-]+", alias.lower()):
+                cleaned = re.sub(r"[^a-z0-9]", "", part)
+                if cleaned:
+                    words.add(cleaned)
+
+    for group in (ACTION_VERBS, COMMON_SKILLS):
+        for item in group:
+            for part in re.split(r"[\s/&+_-]+", str(item).lower()):
+                cleaned = re.sub(r"[^a-z0-9]", "", part)
+                if cleaned:
+                    words.add(cleaned)
+
+    return frozenset(word for word in words if word)
+
+
+RESUME_WORD_LEXICON = _build_resume_word_lexicon()
+MAX_SEGMENT_WORD_LEN = max(len(word) for word in RESUME_WORD_LEXICON)
+LONG_ALPHA_RUN_RE = re.compile(r"[A-Za-z]{8,}")
+CHARACTER_SPACED_TOKEN_RE = re.compile(r"^[A-Za-z0-9&/(),.;:+-]$")
+COMPACT_TERM_FIXES = (
+    (re.compile(r"\bFast API\b"), "FastAPI"),
+    (re.compile(r"\bJava Script\b"), "JavaScript"),
+    (re.compile(r"\bType Script\b"), "TypeScript"),
+    (re.compile(r"\bNode JS\b"), "Node.js"),
+    (re.compile(r"\bNext JS\b"), "Next.js"),
+)
 
 
 class ResumeBreakdown(BaseModel):
@@ -82,6 +165,7 @@ def clean_resume_text(text: str) -> str:
 
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     text = re.sub(r"[^\x09\x0A\x0D\x20-\x7E]", " ", text)
+    text = repair_resume_text_spacing(text)
     text = re.sub(r"[ \t]+", " ", text)
 
     lines = []
@@ -97,6 +181,101 @@ def clean_resume_text(text: str) -> str:
         previous_blank = False
 
     return "\n".join(lines).strip()
+
+
+def repair_resume_text_spacing(text: str) -> str:
+    """
+    Repair common PDF extraction failures where spaces disappear between words.
+    Keeps line breaks intact while splitting CamelCase and long glued word runs.
+    """
+    if not text:
+        return ""
+
+    repaired_lines: list[str] = []
+    for raw_line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        line = _collapse_character_spaced_line(raw_line)
+        line = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", line)
+        line = re.sub(r"(?<=[A-Z])(?=[A-Z][a-z])", " ", line)
+        line = re.sub(r"(?<=[,;:])(?=[A-Za-z0-9])", " ", line)
+        line = re.sub(r"(?<=[.!?])(?=[A-Z])", " ", line)
+        line = re.sub(r"/(?=[A-Za-z]{8,})", "/ ", line)
+        line = LONG_ALPHA_RUN_RE.sub(lambda match: _segment_alpha_run(match.group(0)), line)
+        for pattern, replacement in COMPACT_TERM_FIXES:
+            line = pattern.sub(replacement, line)
+        line = re.sub(r"[ \t]{2,}", " ", line)
+        repaired_lines.append(line)
+
+    return "\n".join(repaired_lines)
+
+
+def _collapse_character_spaced_line(line: str) -> str:
+    tokens = line.split()
+    if len(tokens) < 6:
+        return line
+
+    character_tokens = sum(1 for token in tokens if CHARACTER_SPACED_TOKEN_RE.fullmatch(token))
+    if character_tokens / len(tokens) < 0.65:
+        return line
+
+    return "".join(tokens)
+
+
+def _segment_alpha_run(token: str) -> str:
+    lowered = token.lower()
+    if len(lowered) < 8 or lowered in RESUME_WORD_LEXICON:
+        return token
+
+    parts = _fully_segment_alpha_run(lowered)
+    if not parts or len(parts) < 2:
+        return token
+
+    return _restore_segment_case(parts, token)
+
+
+@lru_cache(maxsize=2048)
+def _fully_segment_alpha_run(lowered: str) -> tuple[str, ...] | None:
+    n = len(lowered)
+
+    @lru_cache(maxsize=None)
+    def solve(index: int) -> tuple[int, tuple[str, ...]] | None:
+        if index == n:
+            return (0, ())
+
+        best: tuple[int, tuple[str, ...]] | None = None
+        max_end = min(n, index + MAX_SEGMENT_WORD_LEN)
+        for end in range(max_end, index, -1):
+            word = lowered[index:end]
+            if word not in RESUME_WORD_LEXICON:
+                continue
+            tail = solve(end)
+            if tail is None:
+                continue
+            score = len(word) * len(word) + tail[0]
+            if best is None or score > best[0]:
+                best = (score, (word, *tail[1]))
+
+        return best
+
+    result = solve(0)
+    return result[1] if result else None
+
+
+def _restore_segment_case(parts: tuple[str, ...], original: str) -> str:
+    restored: list[str] = []
+    original_is_upper = original.isupper()
+
+    for index, part in enumerate(parts):
+        if part in SEGMENT_ACRONYMS:
+            word = SEGMENT_ACRONYMS[part]
+        elif original_is_upper:
+            word = part.upper()
+        elif index == 0 and original[:1].isupper():
+            word = part.capitalize()
+        else:
+            word = part
+        restored.append(word)
+
+    return " ".join(restored)
 
 
 def parse_resume(resume_text: str) -> dict[str, Any]:
@@ -197,6 +376,7 @@ def analyze_resume(resume_text: str, target_role: str = "") -> dict[str, Any]:
         "score": analysis["score"],
         "breakdown": analysis["breakdown"],
         "sections": analysis["sections"],
+        "summary_feedback": analysis.get("summary_feedback", {}),
     }
 
 

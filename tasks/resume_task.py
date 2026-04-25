@@ -43,6 +43,8 @@ CRITICAL RULES:
 - If a metric is missing, improve action/clarity/scope without fabricating a number.
 - Prefer high-value issues from summary, experience, projects, and skills.
 - Return at most 8 total issues.
+- Prefer issues that are immediately fixable and have visible recruiter impact.
+- Summary feedback must feel like a real recruiter readout, not generic praise.
 - action_type must be "replace".
 
 Return ONLY JSON. Do not include any extra text.

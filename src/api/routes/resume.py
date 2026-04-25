@@ -25,6 +25,7 @@ from src.resume_lab import (
     load_json_field,
     mark_issue_status,
     parse_resume,
+    repair_resume_text_spacing,
     rescore_resume,
 )
 
@@ -330,14 +331,22 @@ def _get_resume_or_400(session: Session, current_user: User) -> Resume:
 def _ensure_lab_state(resume: Resume) -> None:
     current = resume.current_text or resume.raw_text or ""
     original = resume.original_text or resume.raw_text or current
+    repaired_current = repair_resume_text_spacing(current)
+    repaired_original = repair_resume_text_spacing(original)
+    text_changed = repaired_current != current or repaired_original != original
 
-    resume.original_text = original
-    resume.current_text = current
-    resume.raw_text = current
+    resume.original_text = repaired_original
+    resume.current_text = repaired_current
+    resume.raw_text = repaired_current
     if not resume.applied_fixes:
         resume.applied_fixes = "[]"
-    if not resume.parsed_resume:
-        resume.parsed_resume = dumps_json(parse_resume(current))
+    if text_changed:
+        resume.applied_fixes = dumps_json(_repair_applied_fixes(load_json_field(resume.applied_fixes, [])))
+        repaired_analysis = _repair_saved_analysis(load_json_field(resume.last_analysis, None))
+        resume.last_analysis = dumps_json(repaired_analysis) if repaired_analysis else None
+        resume.parsed_resume = dumps_json(parse_resume(repaired_current))
+    elif not resume.parsed_resume:
+        resume.parsed_resume = dumps_json(parse_resume(repaired_current))
     if not resume.updated_at:
         resume.updated_at = datetime.utcnow()
 
@@ -403,3 +412,44 @@ def _legacy_analysis_fields(analysis: dict[str, Any]) -> dict[str, Any]:
         "improvements": improvements,
         "section_feedback": section_feedback,
     }
+
+
+def _repair_applied_fixes(applied_fixes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    repaired: list[dict[str, Any]] = []
+    for item in applied_fixes or []:
+        if not isinstance(item, dict):
+            continue
+        updated = dict(item)
+        for key in ("original", "improved"):
+            if isinstance(updated.get(key), str):
+                updated[key] = repair_resume_text_spacing(updated[key])
+        repaired.append(updated)
+    return repaired
+
+
+def _repair_saved_analysis(analysis: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(analysis, dict):
+        return analysis
+
+    repaired = load_json_field(dumps_json(analysis), {})
+    for section in repaired.get("sections", []) or []:
+        if not isinstance(section, dict):
+            continue
+        for issue in section.get("issues", []) or []:
+            if not isinstance(issue, dict):
+                continue
+            for key in ("original", "problem", "improved"):
+                if isinstance(issue.get(key), str):
+                    issue[key] = repair_resume_text_spacing(issue[key])
+
+    summary_feedback = repaired.get("summary_feedback")
+    if isinstance(summary_feedback, dict):
+        for key in ("strengths", "weaknesses", "priority_fixes"):
+            values = summary_feedback.get(key)
+            if isinstance(values, list):
+                summary_feedback[key] = [
+                    repair_resume_text_spacing(value) if isinstance(value, str) else value
+                    for value in values
+                ]
+
+    return repaired

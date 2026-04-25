@@ -17,7 +17,7 @@ from sqlmodel import Session, select
 
 from src.database.connection import get_session
 from src.models import CareerCoachMemory, InterviewSession, Resume, User
-from src.api.dependencies import get_current_user
+from src.api.dependencies import get_current_user, get_current_user_optional
 from src.resume_lab import analyze_resume, dumps_json, load_json_field, parse_resume
 
 logger = logging.getLogger(__name__)
@@ -35,35 +35,42 @@ TRAINING_MODES = {
 
 INTERVIEWER_PERSONAS = {
     "balanced": {
-        "label": "Balanced Coach",
+        "label": "Balanced",
         "tone": "professional, realistic, direct but supportive",
         "pressure": "medium",
         "behavior": "Ask crisp questions, press once for specificity, then coach through gaps.",
     },
-    "senior_engineer": {
-        "label": "Senior Engineer",
+    "strict": {
+        "label": "Strict",
+        "tone": "demanding, time-conscious, skeptical of vague answers",
+        "pressure": "high",
+        "behavior": "Interrupt generic answers, push for precision, and challenge weak assumptions quickly.",
+    },
+    "technical": {
+        "label": "Technical",
         "tone": "technical, precise, skeptical of vague claims",
         "pressure": "medium-high",
         "behavior": "Challenge tradeoffs, architecture choices, debugging depth, and implementation details.",
     },
-    "pressure_panel": {
-        "label": "Pressure Panel",
-        "tone": "fast-paced, interruptive, high standards",
-        "pressure": "high",
-        "behavior": "Use short interruptions, ask for concise answers, and push on weak assumptions.",
-    },
-    "friendly_coach": {
-        "label": "Friendly Coach",
+    "friendly": {
+        "label": "Friendly",
         "tone": "warm, encouraging, still rigorous",
         "pressure": "low-medium",
         "behavior": "Normalize mistakes, ask guided follow-ups, and turn gaps into practice tasks.",
     },
-    "behavioral_lead": {
-        "label": "Behavioral Lead",
+    "behavioral": {
+        "label": "Behavioral",
         "tone": "people-focused, evidence-driven",
         "pressure": "medium",
         "behavior": "Probe ownership, conflict, collaboration, ambiguity, and STAR-quality storytelling.",
     },
+}
+
+PERSONA_ALIASES = {
+    "senior_engineer": "technical",
+    "pressure_panel": "strict",
+    "friendly_coach": "friendly",
+    "behavioral_lead": "behavioral",
 }
 
 
@@ -104,6 +111,7 @@ def _normalize_training_mode(value: str | None) -> str:
 
 def _normalize_persona(value: str | None) -> str:
     normalized = str(value or "balanced").strip().lower().replace("-", "_").replace(" ", "_")
+    normalized = PERSONA_ALIASES.get(normalized, normalized)
     return normalized if normalized in INTERVIEWER_PERSONAS else "balanced"
 
 
@@ -144,7 +152,7 @@ def _memory_snapshot(memory: CareerCoachMemory | None) -> dict[str, Any]:
         "session_history": _safe_json_load(memory.session_history, [])[-6:],
         "session_count": memory.session_count,
         "avg_answer_score": memory.avg_answer_score,
-        "preferred_persona": memory.preferred_persona,
+        "preferred_persona": _normalize_persona(memory.preferred_persona),
         "preferred_training_mode": memory.preferred_training_mode,
     }
 
@@ -225,6 +233,8 @@ def _update_coach_memory(
     if focus_area:
         weak_areas = [*weak_areas, focus_area]
 
+    raw_eval = context.get("evaluation", {})
+    normalized_eval = _normalize_and_repair_evaluation(raw_eval, focus_area)
     recurring = _upsert_weak_area_counts(_safe_json_load(memory.recurring_weak_areas, []), weak_areas)
     trend = _safe_json_load(memory.score_trend, [])
     if score is not None:
@@ -262,7 +272,7 @@ def _update_coach_memory(
     memory.session_history = json.dumps(session_history)
     memory.session_count = len({item.get("session_token") for item in session_history if item.get("session_token")})
     memory.avg_answer_score = round(sum(scored) / len(scored), 2) if scored else memory.avg_answer_score
-    memory.preferred_persona = context.get("interviewer_persona", memory.preferred_persona)
+    memory.preferred_persona = _normalize_persona(context.get("interviewer_persona", memory.preferred_persona))
     memory.preferred_training_mode = context.get("training_mode", memory.preferred_training_mode)
     memory.updated_at = datetime.utcnow()
     db.add(memory)
@@ -392,8 +402,174 @@ def _choose_focus_mode(state: dict[str, Any]) -> str:
     return "general"
 
 
+def _format_feedback_message(evaluation: dict[str, Any], focus_area: str = "") -> dict[str, Any]:
+    # Expect a normalized evaluation schema and produce a UI-friendly feedback map.
+    score = evaluation.get("score", "--")
+    confidence = evaluation.get("confidence")
+    what_went_well = [str(x) for x in (evaluation.get("what_went_well") or [])][:3]
+    what_was_missing = [str(x) for x in (evaluation.get("what_was_missing") or [])][:3]
+    how_to_improve = [str(x) for x in (evaluation.get("how_to_improve") or [])][:3]
+    next_focus = str(evaluation.get("next_focus") or focus_area or "specific evidence")
+    final_verdict = evaluation.get("final_verdict")
+    verdict_explanation = str(evaluation.get("verdict_explanation") or "")
+
+    text_lines = [f"Score: {score}/10"]
+    if confidence is not None:
+        text_lines.append(f"Evaluator confidence: {confidence}/10")
+    text_lines.append(f"What went well: {what_went_well[0] if what_went_well else 'You addressed the prompt and attempted a structured response.'}")
+    text_lines.append(f"What was missing: {what_was_missing[0] if what_was_missing else 'More concrete evidence, metrics, or tradeoffs were needed.'}")
+    if len(what_was_missing) > 1:
+        text_lines.append(f"Other gaps: {', '.join(what_was_missing[1:])}")
+    if how_to_improve:
+        text_lines.append(f"How to improve: {how_to_improve[0]}")
+    text_lines.append(f"Next focus: {next_focus}")
+    if final_verdict:
+        text_lines.append(f"Verdict: {final_verdict} - {verdict_explanation}")
+
+    feedback = {
+        "score": score,
+        "confidence": confidence,
+        "what_went_well": what_went_well,
+        "what_was_missing": what_was_missing,
+        "how_to_improve": how_to_improve,
+        "next_focus": next_focus,
+        "final_verdict": final_verdict,
+        "verdict_explanation": verdict_explanation,
+        "text": "\n".join([line for line in text_lines if line]),
+    }
+    return feedback
+
+
+def _normalize_and_repair_evaluation(raw_eval: Any, focus_area: str = "") -> dict[str, Any]:
+    """Normalize evaluator output into the strict schema, repairing missing or malformed fields."""
+    eval_obj: dict[str, Any] = {}
+    # If raw_eval is a string containing JSON, try to load it
+    if isinstance(raw_eval, str):
+        try:
+            eval_obj = json.loads(raw_eval)
+        except Exception:
+            # Try to extract JSON blob
+            import re
+
+            m = re.search(r"\{.*\}", raw_eval, re.DOTALL)
+            if m:
+                try:
+                    eval_obj = json.loads(m.group())
+                except Exception:
+                    eval_obj = {}
+            else:
+                eval_obj = {}
+    elif isinstance(raw_eval, dict):
+        eval_obj = dict(raw_eval)
+    else:
+        eval_obj = {}
+
+    def _get_list(key, legacy_keys=()):
+        for k in (key, *legacy_keys):
+            v = eval_obj.get(k)
+            if isinstance(v, list):
+                return [str(x).strip() for x in v if x is not None]
+            if isinstance(v, str) and v.strip():
+                # split into sentences as fallback
+                parts = [s.strip() for s in re.split(r"[\n\.]+", v) if s.strip()]
+                if parts:
+                    return parts
+        return []
+
+    import re
+
+    # Score and confidence
+    try:
+        score = int(eval_obj.get("score", eval_obj.get("overall_score", 5)))
+    except Exception:
+        score = 5
+    score = max(0, min(10, score))
+
+    try:
+        confidence = int(eval_obj.get("confidence", round(score)))
+    except Exception:
+        confidence = max(0, min(10, int(score)))
+
+    what_went_well = _get_list("what_went_well", ("strengths", "strength"))[:3]
+    what_was_missing = _get_list("what_was_missing", ("weaknesses", "weakness"))[:3]
+    how_to_improve = _get_list("how_to_improve", ("improvement", "improvements"))[:3]
+    next_focus = str(eval_obj.get("next_focus", eval_obj.get("next_answer_focus", focus_area or "specific evidence")))
+    final_verdict = eval_obj.get("final_verdict") or None
+    verdict_explanation = str(eval_obj.get("verdict_explanation", eval_obj.get("verdict_explanation", "")))
+
+    # Ensure minimum list lengths with sensible, targeted fillers
+    if len(what_went_well) < 3:
+        fillers = [
+            "Provided a direct attempt to answer the question",
+            "Used domain-relevant terminology",
+            "Outlined a concrete decision or step taken",
+        ]
+        for f in fillers:
+            if len(what_went_well) >= 3:
+                break
+            if f not in what_went_well:
+                what_went_well.append(f)
+
+    if len(what_was_missing) < 3:
+        fillers = [
+            "Missing a concrete metric or measurable result",
+            "Needed clearer tradeoffs or constraints",
+            "Lacked precise ownership or role clarity",
+        ]
+        for f in fillers:
+            if len(what_was_missing) >= 3:
+                break
+            if f not in what_was_missing:
+                what_was_missing.append(f)
+
+    if len(how_to_improve) < 3:
+        # If a single long improvement string exists, split it
+        if isinstance(eval_obj.get("how_to_improve"), str) and len(how_to_improve) < 3:
+            parts = [s.strip() for s in re.split(r"[\n\.]+", eval_obj.get("how_to_improve")) if s.strip()]
+            for p in parts:
+                if len(how_to_improve) >= 3:
+                    break
+                how_to_improve.append(p)
+        fillers = [
+            "Use one concrete example with the decision and the result",
+            "State the measurable outcome (metric or impact)",
+            "Describe tradeoffs and why you chose that approach",
+        ]
+        for f in fillers:
+            if len(how_to_improve) >= 3:
+                break
+            if f not in how_to_improve:
+                how_to_improve.append(f)
+
+    # Derive final verdict if missing
+    if final_verdict not in ("Not Ready", "Borderline", "Ready"):
+        if score < 5:
+            final_verdict = "Not Ready"
+            verdict_explanation = verdict_explanation or "Solidify fundamentals and focus on weak-area drills before applying."
+        elif score < 7.5:
+            final_verdict = "Borderline"
+            verdict_explanation = verdict_explanation or "Some strong answers but inconsistent; prioritize specificity and measurable outcomes."
+        else:
+            final_verdict = "Ready"
+            verdict_explanation = verdict_explanation or "Consistent depth and clarity — you're approaching interview-ready quality."
+
+    normalized = {
+        "score": score,
+        "confidence": confidence,
+        "what_went_well": what_went_well,
+        "what_was_missing": what_was_missing,
+        "how_to_improve": how_to_improve,
+        "next_focus": next_focus,
+        "final_verdict": final_verdict,
+        "verdict_explanation": verdict_explanation,
+    }
+    return normalized
+
+
 def _state_from_record(rec: InterviewSession) -> dict[str, Any]:
     context = _safe_json_load(rec.personalization_context, {})
+    if isinstance(context, dict) and context.get("interviewer_persona"):
+        context["interviewer_persona"] = _normalize_persona(context.get("interviewer_persona"))
     msgs = _safe_json_load(rec.messages, [])
     last_ai = next((m["content"] for m in reversed(msgs) if m.get("role") == "ai"), "")
     return {
@@ -407,8 +583,9 @@ def _state_from_record(rec: InterviewSession) -> dict[str, Any]:
         "current_question": last_ai,
         "db_id": rec.id,
         "session_token": rec.session_token,
+        "user_id": rec.user_id,
         "training_mode": rec.training_mode,
-        "interviewer_persona": rec.interviewer_persona,
+        "interviewer_persona": _normalize_persona(rec.interviewer_persona),
         "personalization_context": context,
     }
 
@@ -486,18 +663,59 @@ def _generate_daily_plan(memory: CareerCoachMemory, resume_analysis: dict[str, A
 def start_interview(
     req: StartReq,
     db: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    current_user: User | None = Depends(get_current_user_optional),
 ):
     training_mode = _normalize_training_mode(req.training_mode)
     interviewer_persona = _normalize_persona(req.interviewer_persona)
-    memory = _get_or_create_memory(db, current_user.id)
-    # Make it interactive from the beginning and instant (no LLM delay)
-    persona_label = INTERVIEWER_PERSONAS[interviewer_persona]["label"]
-    question = f"Hello, I am your {persona_label} for this {req.role} mock interview. We will use {TRAINING_MODES[training_mode].lower()} Whenever you're ready, introduce yourself in 45 seconds."
+    memory = _get_or_create_memory(db, current_user.id) if current_user else None
+    focus_mode = "weak_area" if req.weak_areas else "general"
+    if training_mode == "behavioral_only":
+        focus_mode = "behavioral_only"
+    elif training_mode == "domain_specific":
+        focus_mode = "domain_specific"
+
+    try:
+        from crew import run_interview_start
+
+        first = run_interview_start(
+            role=req.role,
+            difficulty=req.difficulty,
+            weak_areas=req.weak_areas,
+            resume_context={},
+            section_scores={},
+            focus_mode=focus_mode,
+            training_mode=training_mode,
+            interviewer_persona=INTERVIEWER_PERSONAS[interviewer_persona],
+            coach_memory=_memory_snapshot(memory),
+            domain_focus=req.domain_focus,
+        )
+    except Exception as exc:
+        logger.error("Manual interview start failed: %s", exc, exc_info=True)
+        first = {
+            "question": f"Let's begin. In 5 to 10 lines, walk me through the experience that best proves you can handle a {req.role} role. Be specific about what you built, decided, and improved.",
+            "focus_area": req.weak_areas[0] if req.weak_areas else "general role fit",
+            "focus_type": focus_mode,
+            "interviewer_signal": "I will challenge vague claims.",
+            "pressure_level": INTERVIEWER_PERSONAS[interviewer_persona]["pressure"],
+            "answer_expectation": "Answer in 5-10 lines with context, decisions, tradeoffs, and measurable outcome.",
+        }
+
+    question = str(first.get("question") or "").strip()
+    answer_expectation = str(first.get("answer_expectation") or "Answer in 5-10 lines with context, decisions, tradeoffs, and measurable outcome.").strip()
+    focus_type = _normalize_focus_type(first.get("focus_type"), focus_mode)
     session_token = uuid.uuid4().hex
 
     # Persist to DB
-    first_msg = {"role": "ai", "content": question, "timestamp": datetime.utcnow().isoformat()}
+    first_msg = {
+        "role": "ai",
+        "content": question,
+        "timestamp": datetime.utcnow().isoformat(),
+        "focus_area": first.get("focus_area", req.weak_areas[0] if req.weak_areas else "general role fit"),
+        "focus_type": focus_type,
+        "interviewer_signal": first.get("interviewer_signal", ""),
+        "pressure_level": first.get("pressure_level", INTERVIEWER_PERSONAS[interviewer_persona]["pressure"]),
+        "answer_expectation": answer_expectation,
+    }
     context = {
         "source": "manual",
         "role": req.role,
@@ -512,20 +730,23 @@ def start_interview(
         "persona_profile": INTERVIEWER_PERSONAS[interviewer_persona],
         "domain_focus": req.domain_focus,
         "coach_memory": _memory_snapshot(memory),
+        "current_focus_area": first_msg["focus_area"],
     }
-    db_session = InterviewSession(
-        user_id=current_user.id,
-        session_token=session_token,
-        role=req.role,
-        difficulty=req.difficulty,
-        training_mode=training_mode,
-        interviewer_persona=interviewer_persona,
-        messages=json.dumps([first_msg]),
-        personalization_context=json.dumps(context),
-    )
-    db.add(db_session)
-    db.commit()
-    db.refresh(db_session)
+    db_session = None
+    if current_user is not None:
+        db_session = InterviewSession(
+            user_id=current_user.id,
+            session_token=session_token,
+            role=req.role,
+            difficulty=req.difficulty,
+            training_mode=training_mode,
+            interviewer_persona=interviewer_persona,
+            messages=json.dumps([first_msg]),
+            personalization_context=json.dumps(context),
+        )
+        db.add(db_session)
+        db.commit()
+        db.refresh(db_session)
 
     # Keep live state in memory
     _sessions[session_token] = {
@@ -537,21 +758,33 @@ def start_interview(
         "scores": [],
         "messages": [first_msg],
         "current_question": question,
-        "db_id": db_session.id,
+        "db_id": db_session.id if db_session else None,
         "session_token": session_token,
+        "user_id": current_user.id if current_user else None,
         "training_mode": training_mode,
         "interviewer_persona": interviewer_persona,
         "personalization_context": context,
     }
+    persona_profile = INTERVIEWER_PERSONAS.get(interviewer_persona, INTERVIEWER_PERSONAS["balanced"])
+    session_intro = (
+        f"This mock interview simulates a {persona_profile.get('label', 'Balanced')} interviewer under {first_msg.get('pressure_level', persona_profile.get('pressure', 'medium'))} pressure. "
+        "Treat answers like a live screening: be concise, cite specific decisions, and quantify outcomes where possible."
+    )
 
     return {
         "session_id": session_token,
         "question": question,
-        "db_id": db_session.id,
+        "db_id": db_session.id if db_session else None,
+        "focus_area": first_msg["focus_area"],
+        "focus_type": focus_type,
+        "interviewer_signal": first_msg["interviewer_signal"],
+        "pressure_level": first_msg["pressure_level"],
+        "answer_expectation": answer_expectation,
         "training_mode": training_mode,
         "interviewer_persona": interviewer_persona,
-        "persona": INTERVIEWER_PERSONAS[interviewer_persona],
+        "persona": persona_profile,
         "coach_memory": context["coach_memory"],
+        "session_intro": session_intro,
     }
 
 
@@ -615,12 +848,16 @@ def start_interview_from_resume(
     except Exception as exc:
         logger.error("Resume-aware interview start failed: %s", exc, exc_info=True)
         first = {
-            "question": f"Let's start with your resume. Which part of your {role} experience best proves you can handle this role, and where do you still need practice?",
+            "question": f"Let's start with your resume. In 5 to 10 lines, which part of your {role} experience best proves you can do this job? Be precise about the decision you made, the technical detail that mattered, and the result.",
             "focus_area": context["weak_areas"][0] if context["weak_areas"] else "general resume walkthrough",
             "focus_type": focus_mode,
+            "interviewer_signal": "I will press for evidence, not generic claims.",
+            "pressure_level": INTERVIEWER_PERSONAS[interviewer_persona]["pressure"],
+            "answer_expectation": "Answer in 5-10 lines with context, decisions, tradeoffs, and measurable outcome.",
         }
 
     question = str(first.get("question") or "Tell me about your most relevant project and what you would improve.").strip()
+    answer_expectation = str(first.get("answer_expectation") or "Answer in 5-10 lines with context, decisions, tradeoffs, and measurable outcome.").strip()
     focus_type = _normalize_focus_type(first.get("focus_type"), focus_mode)
     context["focus_counts"][focus_type] = context["focus_counts"].get(focus_type, 0) + 1
     context["current_focus_area"] = first.get("focus_area", context["weak_areas"][0] if context["weak_areas"] else "general")
@@ -633,6 +870,9 @@ def start_interview_from_resume(
         "focus_area": context["current_focus_area"],
         "focus_type": focus_type,
         "source": "resume_lab",
+        "interviewer_signal": first.get("interviewer_signal", ""),
+        "pressure_level": first.get("pressure_level", INTERVIEWER_PERSONAS[interviewer_persona]["pressure"]),
+        "answer_expectation": answer_expectation,
     }
     db_session = InterviewSession(
         user_id=current_user.id,
@@ -659,11 +899,17 @@ def start_interview_from_resume(
         "current_question": question,
         "db_id": db_session.id,
         "session_token": session_token,
+        "user_id": current_user.id,
         "training_mode": training_mode,
         "interviewer_persona": interviewer_persona,
         "personalization_context": context,
     }
     _update_coach_memory(db, current_user.id, _sessions[session_token])
+    persona_profile = INTERVIEWER_PERSONAS.get(interviewer_persona, INTERVIEWER_PERSONAS["balanced"])
+    session_intro = (
+        f"This mock interview simulates a {persona_profile.get('label', 'Balanced')} interviewer under {first_msg.get('pressure_level', persona_profile.get('pressure', 'medium'))} pressure. "
+        "Treat answers like a live screening: be concise, cite specific decisions, and quantify outcomes where possible."
+    )
 
     return {
         "session_id": session_token,
@@ -677,11 +923,15 @@ def start_interview_from_resume(
         "resume_score": context["resume_score"],
         "focus_area": context["current_focus_area"],
         "focus_type": focus_type,
+        "interviewer_signal": first_msg["interviewer_signal"],
+        "pressure_level": first_msg["pressure_level"],
+        "answer_expectation": answer_expectation,
         "question_mix": context["question_mix"],
         "training_mode": training_mode,
         "interviewer_persona": interviewer_persona,
-        "persona": INTERVIEWER_PERSONAS[interviewer_persona],
+        "persona": persona_profile,
         "coach_memory": context["coach_memory"],
+        "session_intro": session_intro,
     }
 
 
@@ -689,16 +939,21 @@ def start_interview_from_resume(
 def submit_answer(
     req: AnswerReq,
     db: Session = Depends(get_session),
-    current_user: User = Depends(get_current_user),
+    current_user: User | None = Depends(get_current_user_optional),
 ):
     state = _sessions.get(req.session_id)
     if state is None:
+        if current_user is None:
+            raise HTTPException(status_code=400, detail="Invalid session ID. Please start a new interview.")
         # Try to reload from DB (e.g. server restart)
         rec = db.exec(select(InterviewSession).where(InterviewSession.session_token == req.session_id)).first()
-        if rec is None:
+        if rec is None or rec.user_id != current_user.id:
             raise HTTPException(status_code=400, detail="Invalid session ID. Please start a new interview.")
         state = _state_from_record(rec)
         _sessions[req.session_id] = state
+    elif state.get("user_id") is not None:
+        if current_user is None or state.get("user_id") != current_user.id:
+            raise HTTPException(status_code=401, detail="Not authenticated")
 
     focus_mode = _choose_focus_mode(state)
     context = state.get("personalization_context") or {}
@@ -720,6 +975,8 @@ def submit_answer(
             ),
             coach_memory=context.get("coach_memory", {}),
             domain_focus=context.get("domain_focus", ""),
+            conversation_history=state.get("messages", [])[-8:],
+            current_focus_area=context.get("current_focus_area", ""),
         )
     except Exception as exc:
         logger.error("Interview answer failed: %s", exc, exc_info=True)
@@ -753,27 +1010,63 @@ def submit_answer(
     state["personalization_context"] = context
 
     now = datetime.utcnow().isoformat()
+    # Normalize and repair evaluator output into the strict schema
+    raw_eval = result.get("evaluation", {})
+    normalized_eval = _normalize_and_repair_evaluation(raw_eval, context.get("current_focus_area", ""))
+    feedback = _format_feedback_message(normalized_eval, context.get("current_focus_area", ""))
+    feedback_text = feedback.get("text") if isinstance(feedback, dict) else str(feedback)
     state["messages"].append({"role": "user", "content": req.answer, "timestamp": now})
+    state["messages"].append({
+        "role": "feedback",
+        "content": feedback_text,
+        "score": score,
+        "focus_area": context.get("current_focus_area"),
+        "timestamp": now,
+        "meta": normalized_eval,
+    })
     state["messages"].append({
         "role": "ai",
         "content": state["current_question"],
-        "feedback": result.get("evaluation", {}).get("improvements") or result.get("evaluation", {}).get("improvement", ""),
         "score": score,
         "difficulty": state["difficulty"],
         "focus_area": context["current_focus_area"],
         "focus_type": focus_type,
         "adaptive_mode": result.get("adaptive_mode", focus_mode),
+        "interviewer_signal": result.get("interviewer_signal", ""),
+        "pressure_level": result.get("pressure_level", INTERVIEWER_PERSONAS.get(context.get("interviewer_persona", "balanced"), INTERVIEWER_PERSONAS["balanced"]).get("pressure", "medium")),
+        "answer_expectation": result.get("answer_expectation", ""),
         "timestamp": now,
     })
 
     avg = sum(state["scores"]) / len(state["scores"]) if state["scores"] else None
-    memory = _update_coach_memory(db, current_user.id, state, score)
-    context["coach_memory"] = _memory_snapshot(memory)
+    if current_user is not None:
+        memory = _update_coach_memory(db, current_user.id, state, score)
+        context["coach_memory"] = _memory_snapshot(memory)
+        _save_session_state(db, req.session_id, state, avg)
+    else:
+        context["coach_memory"] = _memory_snapshot(None)
     state["personalization_context"] = context
-    _save_session_state(db, req.session_id, state, avg)
+
+    # Derive a compact final verdict from rolling scores
+    final_verdict = None
+    verdict_explanation = ""
+    try:
+        if avg is not None:
+            if avg < 5:
+                final_verdict = "Not Ready"
+                verdict_explanation = "Solidify fundamentals and focus on weak-area drills before applying."
+            elif avg < 7.5:
+                final_verdict = "Borderline"
+                verdict_explanation = "Some strong answers but inconsistent; prioritize specificity and measurable outcomes."
+            else:
+                final_verdict = "Ready"
+                verdict_explanation = "Consistent depth and clarity — you're approaching interview-ready quality."
+    except Exception:
+        final_verdict = None
 
     return {
         **result,
+        "evaluation": normalized_eval,
         "difficulty": state["difficulty"],
         "focus_area": context["current_focus_area"],
         "focus_type": focus_type,
@@ -782,9 +1075,15 @@ def submit_answer(
         "training_mode": context.get("training_mode", state.get("training_mode", "adaptive")),
         "interviewer_persona": context.get("interviewer_persona", state.get("interviewer_persona", "balanced")),
         "persona": INTERVIEWER_PERSONAS.get(context.get("interviewer_persona", "balanced"), INTERVIEWER_PERSONAS["balanced"]),
+        "feedback_message": feedback_text,
+        "feedback": feedback,
+        "answer_expectation": result.get("answer_expectation", ""),
+        "session_turn": len(state["answers"]),
         "coach_memory": context["coach_memory"],
+        "avg_score": avg,
+        "final_verdict": final_verdict,
+        "verdict_explanation": verdict_explanation,
     }
-
 
 @router.get("/coach-memory")
 def get_coach_memory(
@@ -843,8 +1142,8 @@ def list_sessions(
             "session_token": r.session_token,
             "role": r.role,
             "difficulty": r.difficulty,
-            "training_mode": r.training_mode,
-            "interviewer_persona": r.interviewer_persona,
+            "training_mode": _normalize_training_mode(r.training_mode),
+            "interviewer_persona": _normalize_persona(r.interviewer_persona),
             "avg_score": r.avg_score,
             "status": r.status,
             "message_count": len(_safe_json_load(r.messages, [])),
@@ -868,10 +1167,11 @@ def get_session_history(
         raise HTTPException(status_code=404, detail="Session not found.")
     return {
         "id": rec.id,
+        "session_token": rec.session_token,
         "role": rec.role,
         "difficulty": rec.difficulty,
-        "training_mode": rec.training_mode,
-        "interviewer_persona": rec.interviewer_persona,
+        "training_mode": _normalize_training_mode(rec.training_mode),
+        "interviewer_persona": _normalize_persona(rec.interviewer_persona),
         "avg_score": rec.avg_score,
         "status": rec.status,
         "messages": _safe_json_load(rec.messages, []),

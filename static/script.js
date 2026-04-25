@@ -40,6 +40,13 @@ let selectedFile = null;
 const displayUser      = document.getElementById('display-user');
 const jobsContainer    = document.getElementById('jobs-container');
 const trackerContainer = document.getElementById('tracker-container');
+const jobsFeedHeadline = document.getElementById('jobs-feed-headline');
+const jobsFeedNote = document.getElementById('jobs-feed-note');
+const jobsRoleMix = document.getElementById('jobs-role-mix');
+const jobsGapFocus = document.getElementById('jobs-gap-focus');
+const jobsGapNote = document.getElementById('jobs-gap-note');
+const jobsBestMatch = document.getElementById('jobs-best-match');
+const jobsBestMatchNote = document.getElementById('jobs-best-match-note');
 
 const coachStreakCount = document.getElementById('coach-streak-count');
 const coachStreakCopy = document.getElementById('coach-streak-copy');
@@ -65,6 +72,10 @@ const coachTargetRole = document.getElementById('coach-target-role');
 const coachStartInterviewBtn = document.getElementById('coach-start-interview-btn');
 const coachFixResumeBtn = document.getElementById('coach-fix-resume-btn');
 const coachRefreshPlanBtn = document.getElementById('coach-refresh-plan-btn');
+const coachDailyGain = document.getElementById('coach-daily-gain');
+const coachReadyState = document.getElementById('coach-ready-state');
+const coachNextActionBtn = document.getElementById('coach-next-action-btn');
+const coachNextActionCopy = document.getElementById('coach-next-action-copy');
 
 const dashboardResumeInput = document.getElementById('dashboard-resume-input');
 const chooseDashboardResumeBtn = document.getElementById('choose-dashboard-resume-btn');
@@ -130,6 +141,7 @@ let resumeLabLoaded = false;
 let resumeCompareView = 'after';
 let resumeFeedbackTimer = null;
 let resumeStreakState = { count: 0, lastDate: null };
+let dailyProgressState = { date: null, points: 0, completed: 0, lastEvent: '' };
 let coachDashboardLoaded = false;
 let coachState = {
     memory: null,
@@ -154,10 +166,13 @@ function showLoading(text = 'Processing...') {
 }
 
 function getAuthHeaders() {
-    return {
+    const headers = {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${authToken}`,
     };
+    if (authToken) {
+        headers.Authorization = `Bearer ${authToken}`;
+    }
+    return headers;
 }
 
 function showToast(message, type = 'success') {
@@ -231,8 +246,9 @@ async function api(url, options = {}, config = {}) {
     const retryDelay = Number(config.retryDelay) || 450;
     const isFormData = options.body instanceof FormData;
     const headers = options.headers || {};
+    const authHeader = authToken ? { 'Authorization': `Bearer ${authToken}` } : {};
     const mergedHeaders = isFormData
-        ? { 'Authorization': `Bearer ${authToken}`, ...headers }
+        ? { ...authHeader, ...headers }
         : { ...getAuthHeaders(), ...headers };
 
     let lastError = null;
@@ -332,6 +348,178 @@ function getOptimisticIssueIds() {
     );
 }
 
+const RESUME_SEGMENT_ACRONYMS = {
+    ai: 'AI',
+    api: 'API',
+    apis: 'APIs',
+    ats: 'ATS',
+    aws: 'AWS',
+    css: 'CSS',
+    cv: 'CV',
+    db: 'DB',
+    gpa: 'GPA',
+    html: 'HTML',
+    ios: 'iOS',
+    java: 'Java',
+    js: 'JS',
+    json: 'JSON',
+    llm: 'LLM',
+    ml: 'ML',
+    nlp: 'NLP',
+    oop: 'OOP',
+    pdf: 'PDF',
+    python: 'Python',
+    rag: 'RAG',
+    react: 'React',
+    rest: 'REST',
+    sql: 'SQL',
+    ui: 'UI',
+    ux: 'UX',
+};
+
+const RESUME_WORD_LEXICON = new Set([
+    'a', 'ability', 'able', 'about', 'across', 'add', 'agent', 'agents', 'analysis', 'and',
+    'app', 'application', 'applications', 'as', 'backend', 'build', 'building', 'can',
+    'clean', 'clear', 'code', 'coding', 'comma', 'computer', 'data', 'deep', 'design',
+    'designed', 'detected', 'development', 'efficient', 'engineer', 'engineering', 'experience',
+    'fast', 'focus', 'foundations', 'framework', 'frameworks', 'functionalities', 'generative', 'impact',
+    'improved', 'in', 'integrate', 'intelligent', 'is', 'job', 'keyword', 'keywords',
+    'knowledge', 'languages', 'large', 'maintainable', 'matching', 'model', 'models', 'multi',
+    'no', 'of', 'on', 'platforms', 'possesses', 'problem', 'problem-solving', 'programming',
+    'project', 'projects', 'readable', 'recruiter', 'reduce', 'science', 'section',
+    'separated', 'skills', 'skilled', 'software', 'solving', 'strong', 'strongest', 'student',
+    'summary', 'system', 'systems', 'the', 'third', 'to', 'tools', 'was', 'with', 'working',
+    'year', 'your', ...Object.keys(RESUME_SEGMENT_ACRONYMS),
+]);
+
+const MAX_RESUME_SEGMENT_WORD_LEN = Math.max(...Array.from(RESUME_WORD_LEXICON, word => word.length));
+const RESUME_LONG_ALPHA_RUN_RE = /[A-Za-z]{8,}/g;
+const RESUME_CHARACTER_SPACED_TOKEN_RE = /^[A-Za-z0-9&/(),.;:+-]$/;
+const RESUME_COMPACT_TERM_FIXES = [
+    [/\bFast API\b/g, 'FastAPI'],
+    [/\bJava Script\b/g, 'JavaScript'],
+    [/\bType Script\b/g, 'TypeScript'],
+    [/\bNode JS\b/g, 'Node.js'],
+    [/\bNext JS\b/g, 'Next.js'],
+];
+const resumeSegmentCache = new Map();
+
+function repairResumeDisplayText(text) {
+    if (!text) return '';
+
+    return String(text)
+        .replace(/\r\n?/g, '\n')
+        .split('\n')
+        .map(rawLine => {
+            let line = collapseCharacterSpacedLine(rawLine);
+            line = line.replace(/(?<=[a-z])(?=[A-Z])/g, ' ');
+            line = line.replace(/(?<=[A-Z])(?=[A-Z][a-z])/g, ' ');
+            line = line.replace(/(?<=[,;:])(?=[A-Za-z0-9])/g, ' ');
+            line = line.replace(/(?<=[.!?])(?=[A-Z])/g, ' ');
+            line = line.replace(/\/(?=[A-Za-z]{8,})/g, '/ ');
+            line = line.replace(RESUME_LONG_ALPHA_RUN_RE, token => segmentResumeAlphaRun(token));
+            RESUME_COMPACT_TERM_FIXES.forEach(([pattern, replacement]) => {
+                line = line.replace(pattern, replacement);
+            });
+            line = line.replace(/[ \t]{2,}/g, ' ');
+            return line.trim();
+        })
+        .join('\n')
+        .trim();
+}
+
+function collapseCharacterSpacedLine(line) {
+    const tokens = String(line || '').trim().split(/\s+/).filter(Boolean);
+    if (tokens.length < 6) return String(line || '');
+
+    const characterTokens = tokens.filter(token => RESUME_CHARACTER_SPACED_TOKEN_RE.test(token)).length;
+    if ((characterTokens / tokens.length) < 0.65) return String(line || '');
+
+    return tokens.join('');
+}
+
+function segmentResumeAlphaRun(token) {
+    const lowered = String(token || '').toLowerCase();
+    if (lowered.length < 8 || RESUME_WORD_LEXICON.has(lowered)) return token;
+
+    const parts = fullySegmentResumeAlphaRun(lowered);
+    if (!Array.isArray(parts) || parts.length < 2) return token;
+    return restoreResumeSegmentCase(parts, token);
+}
+
+function fullySegmentResumeAlphaRun(lowered) {
+    if (resumeSegmentCache.has(lowered)) return resumeSegmentCache.get(lowered);
+
+    const memo = new Map();
+    const solve = index => {
+        if (index === lowered.length) return { score: 0, parts: [] };
+        if (memo.has(index)) return memo.get(index);
+
+        let best = null;
+        const maxEnd = Math.min(lowered.length, index + MAX_RESUME_SEGMENT_WORD_LEN);
+        for (let end = maxEnd; end > index; end -= 1) {
+            const word = lowered.slice(index, end);
+            if (!RESUME_WORD_LEXICON.has(word)) continue;
+            const tail = solve(end);
+            if (!tail) continue;
+            const score = word.length * word.length + tail.score;
+            if (!best || score > best.score) {
+                best = { score, parts: [word, ...tail.parts] };
+            }
+        }
+
+        memo.set(index, best);
+        return best;
+    };
+
+    const result = solve(0);
+    const parts = result ? result.parts : null;
+    resumeSegmentCache.set(lowered, parts);
+    return parts;
+}
+
+function restoreResumeSegmentCase(parts, original) {
+    const source = String(original || '');
+    const originalIsUpper = source && source.toUpperCase() === source;
+    return parts.map((part, index) => {
+        if (RESUME_SEGMENT_ACRONYMS[part]) return RESUME_SEGMENT_ACRONYMS[part];
+        if (originalIsUpper) return part.toUpperCase();
+        if (index === 0 && /^[A-Z]/.test(source)) return part.charAt(0).toUpperCase() + part.slice(1);
+        return part;
+    }).join(' ');
+}
+
+function normalizeResumeTextList(values) {
+    return Array.isArray(values)
+        ? values.map(value => repairResumeDisplayText(String(value || '').trim())).filter(Boolean)
+        : [];
+}
+
+function normalizeParsedResume(parsed, fallbackText = '') {
+    const fallback = fallbackText
+        ? parseResumeTextForPreview(fallbackText)
+        : { summary: '', experience: [], projects: [], skills: [], education: [], other: [] };
+    const source = parsed && typeof parsed === 'object' ? parsed : {};
+    return {
+        summary: repairResumeDisplayText(source.summary || fallback.summary || ''),
+        experience: normalizeResumeTextList(source.experience || fallback.experience || []),
+        projects: normalizeResumeTextList(source.projects || fallback.projects || []),
+        skills: normalizeResumeTextList(source.skills || fallback.skills || []),
+        education: normalizeResumeTextList(source.education || fallback.education || []),
+        other: normalizeResumeTextList(source.other || fallback.other || []),
+    };
+}
+
+function normalizeAppliedFixes(appliedFixes) {
+    return Array.isArray(appliedFixes)
+        ? appliedFixes.map(fix => ({
+            ...fix,
+            original: repairResumeDisplayText(fix?.original || ''),
+            improved: repairResumeDisplayText(fix?.improved || ''),
+        }))
+        : [];
+}
+
 function getDisplayScore(analysis) {
     if (!analysis) return 0;
     const totalIssues = getAllResumeIssues(analysis).length;
@@ -362,7 +550,7 @@ function getDisplayBreakdown(analysis) {
 }
 
 function parseResumeTextForPreview(text) {
-    const lines = String(text || '')
+    const lines = String(repairResumeDisplayText(text) || '')
         .split(/\r?\n/)
         .map(line => line.trim())
         .filter(Boolean);
@@ -585,6 +773,42 @@ function renderResumeStreak() {
     if (resumeStreakCount) resumeStreakCount.textContent = String(resumeStreakState.count || 0);
 }
 
+function getDailyProgressSnapshot() {
+    const storageKey = 'jobify_daily_progress';
+    const today = getLocalDateKey();
+    let stored = {};
+    try {
+        stored = JSON.parse(localStorage.getItem(storageKey) || '{}');
+    } catch (_) {
+        stored = {};
+    }
+
+    if (stored.date !== today) {
+        dailyProgressState = { date: today, points: 0, completed: 0, lastEvent: '' };
+        localStorage.setItem(storageKey, JSON.stringify(dailyProgressState));
+        return dailyProgressState;
+    }
+
+    dailyProgressState = {
+        date: today,
+        points: Number(stored.points) || 0,
+        completed: Number(stored.completed) || 0,
+        lastEvent: String(stored.lastEvent || ''),
+    };
+    return dailyProgressState;
+}
+
+function recordDailyProgress(points, eventLabel) {
+    const snapshot = getDailyProgressSnapshot();
+    dailyProgressState = {
+        ...snapshot,
+        points: Math.max(0, snapshot.points + Math.max(0, Number(points) || 0)),
+        completed: snapshot.completed + 1,
+        lastEvent: String(eventLabel || snapshot.lastEvent || '').trim(),
+    };
+    localStorage.setItem('jobify_daily_progress', JSON.stringify(dailyProgressState));
+}
+
 function getOpenResumeIssues(analysis) {
     const appliedIds = getAppliedIssueIds();
     return getAllResumeIssues(analysis).filter(issue => !appliedIds.has(issue.id) && issue.status !== 'applied');
@@ -715,10 +939,15 @@ async function performResumeRescore() {
             method: 'POST',
             body: JSON.stringify({ target_role: resumeTargetRole?.value?.trim() || '' }),
         });
-        resumeLabState.last_analysis = normalizeResumeAnalysis(data);
-        if (data.current_resume) resumeLabState.current_resume = data.current_resume;
-        if (Array.isArray(data.applied_fixes)) resumeLabState.applied_fixes = data.applied_fixes;
+        mergeResumeLabState({
+            has_resume: true,
+            current_resume: data.current_resume,
+            parsed_resume: data.parsed_resume,
+            applied_fixes: data.applied_fixes,
+            last_analysis: data,
+        });
         recordResumeLabStreak();
+        recordDailyProgress(2, 'Re-scored resume draft');
         renderResumeWorkbench();
         if (coachDashboardLoaded) renderCoachDashboard();
         showResumeFeedback('Fresh score loaded from your latest resume draft.', 'success');
@@ -799,6 +1028,13 @@ function getPriorityGuidance(analysis) {
 function buildFixPacks(analysis) {
     const openIssues = getOpenResumeIssues(analysis);
     const openIds = new Set(openIssues.map(issue => issue.id));
+    const createPackPreview = issues => issues.slice(0, 2).map(issue => ({
+        before: repairResumeDisplayText(issue.original || ''),
+        after: repairResumeDisplayText(issue.improved || ''),
+    }));
+    const estimatePackGain = issues => issues.reduce((sum, issue) => (
+        sum + (/high/i.test(issue.severity || '') ? 5 : /medium/i.test(issue.severity || '') ? 3 : 2)
+    ), 0);
     const packs = [
         {
             id: 'impact',
@@ -806,9 +1042,12 @@ function buildFixPacks(analysis) {
             description: 'Upgrade weak bullets with stronger verbs, outcomes, and measurable value.',
             details: [
                 'Rewrites vague lines into outcome-driven bullets',
-                'Adds clearer action verbs and measurable results',
-                'Makes achievements easier to scan quickly',
+                'Adds stronger action verbs and clearer ownership',
+                'Makes achievements easier for recruiters to believe fast',
             ],
+            impact: 'Before: generic contribution blur. After: sharper ownership, clearer result, stronger credibility.',
+            why_this_matters: 'Recruiters and interviewers look for measurable impact — this pack converts vague contributions into concrete outcomes that are easier to probe and trust.',
+            real_world_impact: 'Improving impact phrasing makes your interview examples more persuasive and can increase callback rates by making achievements credible and scannable.',
             matcher: issue => /impact|metric|measurable|weak|verb|result|achievement/i.test(`${issue.problem} ${issue.improved}`),
         },
         {
@@ -820,6 +1059,9 @@ function buildFixPacks(analysis) {
                 'Makes each bullet faster to scan',
                 'Reduces ambiguity in role and project descriptions',
             ],
+            impact: 'Before: dense or unclear lines. After: cleaner sentences that read like a polished real resume.',
+            why_this_matters: 'Clear wording reduces ambiguity and the chance an interviewer will misinterpret your role or impact.',
+            real_world_impact: 'Clearer bullets make it easier to narrate answers under pressure and reduce the likelihood of follow-up clarification questions.',
             matcher: issue => /clarity|vague|specific|clear|concise|structure/i.test(`${issue.problem} ${issue.improved}`),
         },
         {
@@ -831,6 +1073,9 @@ function buildFixPacks(analysis) {
                 'Improves ATS readability with cleaner, clearer phrasing',
                 'Optimizes skills and experience wording without changing your story',
             ],
+            impact: 'Before: weaker keyword coverage. After: stronger ATS scanability and clearer role alignment.',
+            why_this_matters: 'ATS and quick recruiter screens filter many resumes; stronger keyword alignment helps your resume pass initial automated and human filters.',
+            real_world_impact: 'Better ATS fit increases the number of screened resumes that reach recruiters, improving the top-of-funnel for real interviews.',
             matcher: issue => /ats|keyword|skills|tool|technology/i.test(`${issue.problem} ${issue.improved}`),
         },
     ];
@@ -839,6 +1084,11 @@ function buildFixPacks(analysis) {
         .map(pack => ({
             ...pack,
             issues: openIssues.filter(pack.matcher).slice(0, 3),
+        }))
+        .map(pack => ({
+            ...pack,
+            preview: createPackPreview(pack.issues),
+            estimated_gain: estimatePackGain(pack.issues),
         }))
         .filter(pack => pack.issues.length);
 
@@ -853,7 +1103,15 @@ function buildFixPacks(analysis) {
                 id: `section-${String(section.section || 'resume').toLowerCase().replace(/\s+/g, '-')}`,
                 title: `${section.section || 'Resume'} Pack`,
                 description: `Clean up related issues in the ${section.section || 'resume'} section together.`,
+                details: [
+                    `Targets the ${section.section || 'resume'} section only`,
+                    'Turns multiple related fixes into one focused sprint',
+                    'Shows before vs after wording before you apply it',
+                ],
+                impact: `Before: scattered issues inside ${section.section || 'your resume'}. After: one tighter, more coherent section.`,
                 issues,
+                preview: createPackPreview(issues),
+                estimated_gain: estimatePackGain(issues),
             };
         })
         .filter(pack => pack.issues.length >= 2);
@@ -920,13 +1178,14 @@ loginForm.addEventListener('submit', async e => {
     loginBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> <span>Authenticating...</span>';
 
     try {
-        const res = await fetch('/api/auth/login', {
+        const data = await apiJSON('/api/auth/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ username, password }),
+        }, {
+            retries: 1,
+            retryDelay: 700,
         });
-        const data = await readResponseData(res);
-        if (!res.ok) throw new Error(getErrorMessage(data, 'Authentication failed.'));
 
         authToken = data.access_token;
         localStorage.setItem('jobify_token', authToken);
@@ -942,7 +1201,7 @@ loginForm.addEventListener('submit', async e => {
             switchPage('page-home');
         }
     } catch (err) {
-        const message = err.message === 'Failed to fetch'
+        const message = err.message === 'Failed to fetch' || err.message === 'Network request failed.'
             ? 'Could not reach the server. Refresh the page and try again.'
             : err.message;
         showToast(message, 'error');
@@ -959,8 +1218,15 @@ fileInput.addEventListener('change', e => {
         fileInfo.classList.remove('hidden');
         fileNameSpan.textContent = selectedFile.name;
         uploadBtn.disabled = false;
+        uploadBtn.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i> Ingest into Jobify Core';
     }
 });
+
+window.skipUploadAndGoToDashboard = function() {
+    resumeLabState.has_resume = false;
+    showLoading('Skipping upload, loading dashboard...');
+    loadDailyFeed();
+};
 
 uploadBtn.addEventListener('click', async () => {
     if (!selectedFile || !authToken) return;
@@ -1036,10 +1302,13 @@ if (scoreResumeBtn) {
                 method: 'POST',
                 body: JSON.stringify({ target_role: resumeTargetRole?.value?.trim() || '' }),
             });
-            resumeLabState.last_analysis = normalizeResumeAnalysis(data);
-            if (data.current_resume) resumeLabState.current_resume = data.current_resume;
-            if (Array.isArray(data.applied_fixes)) resumeLabState.applied_fixes = data.applied_fixes;
-            resumeLabState.has_resume = true;
+            mergeResumeLabState({
+                has_resume: true,
+                current_resume: data.current_resume,
+                parsed_resume: data.parsed_resume,
+                applied_fixes: data.applied_fixes,
+                last_analysis: data,
+            });
             recordResumeLabStreak();
             renderResumeWorkbench();
             showResumeFeedback('Analysis complete. Start with the priority fixes for the fastest lift.', 'success');
@@ -1067,6 +1336,7 @@ if (fixTopIssuesBtn) {
             });
             mergeResumeLabState(data);
             recordResumeLabStreak();
+            recordDailyProgress(6, 'Applied top resume fixes');
             renderResumeWorkbench();
             showResumeFeedback(data.message || 'Top fixes applied.', 'success');
             showToast(data.message || 'Top fixes applied.', 'success');
@@ -1106,6 +1376,7 @@ if (saveResumeTextBtn) {
             });
             mergeResumeLabState(data);
             recordResumeLabStreak();
+            recordDailyProgress(3, 'Saved resume draft');
             renderResumeWorkbench();
             setResumeStatus('Saved');
             scheduleResumeRescore();
@@ -1225,7 +1496,7 @@ function renderJobs(jobs) {
 
 // ─── Tracker ──────────────────────────────────────────────────────────────────
 async function trackJob(company, title, url) {
-    showLoading('Submitting to tracker...');
+    showLoading('Saving job and preparing tailored resume bullets...');
     try {
         const res = await fetch('/api/jobs/track', {
             method: 'POST',
@@ -1237,7 +1508,7 @@ async function trackJob(company, title, url) {
 
         switchPage('page-results');
         document.querySelector('[data-pane="pane-tracker"]').click();
-        showToast('Job tracked! AI is tailoring your resume in the background.');
+        showToast('Job saved. Resume tailoring has started.', 'success');
         // Poll tracker every 5 seconds until status changes from "Tailoring..."
         loadTracker();
         const poll = setInterval(async () => {
@@ -1260,7 +1531,7 @@ async function loadTracker() {
 
         trackerContainer.innerHTML = '';
         if (apps.length === 0) {
-            trackerContainer.innerHTML = '<p class="empty-state">No tracked jobs yet. Click "Track & Auto-Tailor" on a job card.</p>';
+            trackerContainer.innerHTML = '<p class="empty-state">No saved jobs yet. Use "Save Job & Tailor Resume" on any job card.</p>';
             return;
         }
 
@@ -1291,9 +1562,9 @@ async function loadTracker() {
                 </div>
                 ${bulletsHTML ? `
                     <div class="tailored-section">
-                        <div class="section-label"><i class="fa-solid fa-check-double"></i> AI Tailored Resume Bullets</div>
+                        <div class="section-label"><i class="fa-solid fa-check-double"></i> Tailored Resume Bullets</div>
                         <div class="pre-tailored">${bulletsHTML}</div>
-                    </div>` : (app.status === 'Tailoring...' ? '<p class="empty-state" style="margin-top:1rem"><i class="fa-solid fa-spinner fa-spin"></i> AI is tailoring your resume...</p>' : '')}
+                    </div>` : (app.status === 'Tailoring...' ? '<p class="empty-state" style="margin-top:1rem"><i class="fa-solid fa-spinner fa-spin"></i> Tailoring your resume for this job...</p>' : '')}
             `;
             trackerContainer.appendChild(card);
         });
@@ -1313,13 +1584,15 @@ async function loadResumeLab(force = false) {
     try {
         const data = await apiJSON('/api/resume/lab');
         const pendingRescoreTimer = resumeLabState.ui?.pendingRescoreTimer || null;
+        const currentResume = repairResumeDisplayText(data.current_resume || '');
+        const originalResume = repairResumeDisplayText(data.original_resume || currentResume || '');
         resumeLabState = {
-            has_resume: !!data.has_resume,
-            original_resume: data.original_resume || data.current_resume || '',
-            current_resume: data.current_resume || '',
-            parsed_resume: data.parsed_resume || {},
+            has_resume: !!data.has_resume || !!currentResume,
+            original_resume: originalResume,
+            current_resume: currentResume,
+            parsed_resume: normalizeParsedResume(data.parsed_resume, currentResume || originalResume),
             last_analysis: data.last_analysis ? normalizeResumeAnalysis(data.last_analysis) : null,
-            applied_fixes: Array.isArray(data.applied_fixes) ? data.applied_fixes : [],
+            applied_fixes: normalizeAppliedFixes(data.applied_fixes),
             stats: data.stats || {},
             ui: { pendingRescoreTimer },
         };
@@ -1340,6 +1613,11 @@ function normalizeResumeAnalysis(data) {
             structure: clampScore(data?.breakdown?.structure),
             ats: clampScore(data?.breakdown?.ats),
         },
+        summary_feedback: {
+            strengths: normalizeResumeTextList(data?.summary_feedback?.strengths),
+            weaknesses: normalizeResumeTextList(data?.summary_feedback?.weaknesses),
+            priority_fixes: normalizeResumeTextList(data?.summary_feedback?.priority_fixes),
+        },
         section_scores: data?.section_scores || data?.sectionScores || {},
         sections: Array.isArray(data?.sections)
             ? data.sections.map((section, sectionIndex) => ({
@@ -1348,6 +1626,9 @@ function normalizeResumeAnalysis(data) {
                     ? section.issues.map((issue, issueIndex) => ({
                         ...issue,
                         id: issue?.id || `${section?.section || 'section'}-${issueIndex}`,
+                        original: repairResumeDisplayText(issue?.original || ''),
+                        problem: repairResumeDisplayText(issue?.problem || ''),
+                        improved: repairResumeDisplayText(issue?.improved || ''),
                     }))
                     : [],
             }))
@@ -1357,20 +1638,26 @@ function normalizeResumeAnalysis(data) {
 
 function mergeResumeLabState(data) {
     if ('has_resume' in data) resumeLabState.has_resume = !!data.has_resume;
-    if ('original_resume' in data) resumeLabState.original_resume = data.original_resume || '';
-    if ('current_resume' in data) resumeLabState.current_resume = data.current_resume || '';
+    if ('original_resume' in data) resumeLabState.original_resume = repairResumeDisplayText(data.original_resume || '');
+    if ('current_resume' in data) resumeLabState.current_resume = repairResumeDisplayText(data.current_resume || '');
     if ('parsed_resume' in data) {
-        resumeLabState.parsed_resume = data.parsed_resume || parseResumeTextForPreview(data.current_resume || resumeLabState.current_resume || '');
+        resumeLabState.parsed_resume = normalizeParsedResume(
+            data.parsed_resume,
+            data.current_resume || resumeLabState.current_resume || data.original_resume || resumeLabState.original_resume || '',
+        );
     }
     if ('last_analysis' in data) {
         resumeLabState.last_analysis = data.last_analysis ? normalizeResumeAnalysis(data.last_analysis) : null;
     }
     if (data.analysis) resumeLabState.last_analysis = normalizeResumeAnalysis(data.analysis);
-    if (Array.isArray(data.applied_fixes)) resumeLabState.applied_fixes = data.applied_fixes;
+    if (Array.isArray(data.applied_fixes)) resumeLabState.applied_fixes = normalizeAppliedFixes(data.applied_fixes);
     if (data.stats) resumeLabState.stats = data.stats;
     if (!resumeLabState.original_resume) resumeLabState.original_resume = resumeLabState.current_resume || '';
     if (!resumeLabState.parsed_resume || !Object.keys(resumeLabState.parsed_resume).length) {
-        resumeLabState.parsed_resume = parseResumeTextForPreview(resumeLabState.current_resume || resumeLabState.original_resume || '');
+        resumeLabState.parsed_resume = normalizeParsedResume(
+            resumeLabState.parsed_resume,
+            resumeLabState.current_resume || resumeLabState.original_resume || '',
+        );
     }
     resumeLabState.has_resume = resumeLabState.has_resume || !!resumeLabState.current_resume;
 }
@@ -1549,6 +1836,8 @@ function renderNextAction(analysis) {
     resumeNextActionBtn.innerHTML = '<i class="fa-solid fa-arrow-right"></i> Apply Recommended Fix';
 }
 
+
+
 function renderFixPacks(analysis) {
     if (!resumeFixPacks) return;
     const packs = buildFixPacks(analysis);
@@ -1561,10 +1850,47 @@ function renderFixPacks(analysis) {
 
     resumeFixPacks.innerHTML = packs.map(pack => `
         <article class="fix-pack-card" data-pack-id="${sanitize(pack.id)}">
-            <strong>${sanitize(pack.title)}</strong>
+            <div class="fix-pack-topline">
+                <strong>${sanitize(pack.title)}</strong>
+                <span class="fix-pack-gain">+${Number(pack.estimated_gain || 0)} lift</span>
+            </div>
             <p>${sanitize(pack.description)}</p>
+            <div class="fix-pack-impact">
+                <span class="fix-pack-kicker">What changes</span>
+                <p>${sanitize(pack.impact || 'This pack groups related edits into one meaningful improvement sprint.')}</p>
+            </div>
+            <div class="fix-pack-trust">
+                <span class="fix-pack-kicker">Why this matters</span>
+                <p>${sanitize(pack.why_this_matters || '')}</p>
+                <span class="fix-pack-kicker">Real-world impact</span>
+                <p>${sanitize(pack.real_world_impact || '')}</p>
+            </div>
             ${Array.isArray(pack.details) && pack.details.length
-                ? `<ul>${pack.details.map(item => `<li>✔ ${sanitize(item)}</li>`).join('')}</ul>`
+                ? `
+                    <div class="fix-pack-benefits">
+                        <span class="fix-pack-kicker">What it does</span>
+                        <ul>${pack.details.map(item => `<li>✔ ${sanitize(item)}</li>`).join('')}</ul>
+                    </div>
+                `
+                : ''}
+            ${Array.isArray(pack.preview) && pack.preview.length
+                ? `
+                    <div class="fix-pack-preview">
+                        <span class="fix-pack-kicker">Before vs After Preview</span>
+                        ${pack.preview.map(item => `
+                            <div class="fix-pack-preview-row">
+                                <div class="fix-pack-preview-pane before">
+                                    <label>Before</label>
+                                    <p>${sanitize(item.before || '')}</p>
+                                </div>
+                                <div class="fix-pack-preview-pane after">
+                                    <label>After</label>
+                                    <p>${sanitize(item.after || '')}</p>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                `
                 : ''}
             <div class="fix-pack-meta">
                 <span>${pack.issues.length} fix${pack.issues.length === 1 ? '' : 'es'}</span>
@@ -1610,12 +1936,16 @@ function renderPriorityFixes(analysis) {
     if (resumePriorityGuidance) {
         resumePriorityGuidance.innerHTML = `<i class="fa-solid fa-bolt"></i><span>${sanitize(getPriorityGuidance(analysis))}</span>`;
     }
-    resumePriorityFixes.innerHTML = topIssues.map(issue => `
+    resumePriorityFixes.innerHTML = topIssues.map(issue => {
+        const problemText = repairResumeDisplayText(issue.problem || 'Needs improvement.');
+        const originalText = repairResumeDisplayText(issue.original || '');
+        const improvedText = repairResumeDisplayText(issue.improved || '');
+        return `
         <article class="priority-fix-card ${optimisticIds.has(issue.id) ? 'optimistic' : ''}" data-priority-id="${sanitize(issue.id || '')}">
             <div class="priority-fix-copy">
-                <strong>${sanitize(issue.problem || 'Needs improvement.')}</strong>
-                <p>${sanitize(issue.original || '')}</p>
-                <p class="priority-improved">${sanitize(issue.improved || '')}</p>
+                <strong>${sanitize(problemText)}</strong>
+                <p>${sanitize(originalText)}</p>
+                <p class="priority-improved">${sanitize(improvedText)}</p>
             </div>
             <div class="priority-fix-actions">
                 <button class="btn-outline priority-edit-btn" data-issue-id="${sanitize(issue.id || '')}">
@@ -1626,7 +1956,8 @@ function renderPriorityFixes(analysis) {
                 </button>
             </div>
         </article>
-    `).join('');
+    `;
+    }).join('');
 }
 
 function renderProgressTracker(analysis) {
@@ -1749,6 +2080,9 @@ function renderIssueSections(analysis) {
 function renderIssueCard(issue) {
     const applied = getAppliedIssueIds().has(issue.id) || issue.status === 'applied';
     const optimistic = getOptimisticIssueIds().has(issue.id);
+    const problemText = repairResumeDisplayText(issue.problem || 'Needs improvement.');
+    const originalText = repairResumeDisplayText(issue.original || '');
+    const improvedText = repairResumeDisplayText(issue.improved || '');
     return `
         <article class="issue-card ${applied ? 'applied' : ''} ${optimistic ? 'optimistic' : ''}" data-issue-id="${sanitize(issue.id || '')}">
             <div class="issue-card-head">
@@ -1756,15 +2090,15 @@ function renderIssueCard(issue) {
                 <span>${optimistic ? 'Syncing...' : applied ? 'Applied' : 'Suggested Fix'}</span>
             </div>
             <div class="issue-card-body">
-                <p class="issue-problem">${sanitize(issue.problem || 'Needs improvement.')}</p>
+                <p class="issue-problem">${sanitize(problemText)}</p>
                 <div class="issue-compare">
                     <div class="issue-pane original-pane">
                         <label>Original Text</label>
-                        <p>${sanitize(issue.original || '')}</p>
+                        <p>${sanitize(originalText)}</p>
                     </div>
                     <div class="issue-pane improved-pane">
                         <label>Improved Version</label>
-                        <p>${sanitize(issue.improved || '')}</p>
+                        <p>${sanitize(improvedText)}</p>
                     </div>
                 </div>
                 <div class="issue-actions">
@@ -1873,6 +2207,7 @@ async function applyResumeIssue(issueId, button) {
         });
         mergeResumeLabState(data);
         recordResumeLabStreak();
+        recordDailyProgress(4, 'Applied one resume fix');
         renderResumeWorkbench();
         if (coachDashboardLoaded) renderCoachDashboard();
         const nextIssue = getNextBestIssue(resumeLabState.last_analysis);
@@ -1917,6 +2252,7 @@ async function applyResumeIssuePack(issueIds, button) {
         }
 
         recordResumeLabStreak();
+        recordDailyProgress(Math.max(3, appliedCount * 3), `Applied ${appliedCount} resume pack fix${appliedCount === 1 ? '' : 'es'}`);
         renderResumeWorkbench();
         const nextIssue = getNextBestIssue(resumeLabState.last_analysis);
         showResumeFeedback(
@@ -2021,6 +2357,7 @@ async function loadCoachDashboard(force = false) {
 
 function renderCoachDashboard() {
     renderResumeStreak();
+    const dailySnapshot = getDailyProgressSnapshot();
     const memory = coachState.memory || {};
     const plan = coachState.plan || {};
     const resumeAnalysis = resumeLabState.last_analysis
@@ -2039,10 +2376,27 @@ function renderCoachDashboard() {
         ? Number(coachState.ui.lastConfidence)
         : confidence;
     const confidenceDelta = resumeAnalysis ? confidence - previousConfidence : 0;
+    const nextIssue = getNextBestIssue(resumeAnalysis);
+    const firstTask = Array.isArray(plan?.tasks) ? plan.tasks[0] : null;
+    let nextActionType = 'interview';
+    let nextActionLabel = 'Start Interview';
+    let nextActionCopy = firstTask?.title
+        ? `${firstTask.title}. ${firstTask.why || 'Keep moving with one small task right now.'}`
+        : 'Start an interview to turn today\'s feedback into practice.';
+
+    if (nextIssue) {
+        nextActionType = 'resume_fix';
+        nextActionLabel = 'Fix Resume';
+        nextActionCopy = `Quick win: ${findIssueSection(nextIssue.id, resumeAnalysis)} - ${nextIssue.problem || nextIssue.original}`;
+    } else if (resumeAnalysis && countOpenIssues(resumeAnalysis) === 0 && resumeAnalysis.score >= 80) {
+        nextActionType = 'interview';
+        nextActionLabel = 'Practice Interview';
+        nextActionCopy = 'Your draft looks strong. Practice with an interview while the improvements are still fresh.';
+    }
 
     if (coachStreakCount) coachStreakCount.textContent = String(resumeStreakState.count || 0);
     if (coachStreakCopy) coachStreakCopy.textContent = resumeStreakState.count > 1
-        ? 'You are building a real career-prep habit.'
+        ? 'You are building a steady prep habit.'
         : 'Come back daily to keep the streak alive.';
     if (coachAvgScore) coachAvgScore.textContent = memory.avg_answer_score ? `${Number(memory.avg_answer_score).toFixed(1)}/10` : '--';
     if (coachScoreCopy) coachScoreCopy.textContent = memory.avg_answer_score
@@ -2055,6 +2409,24 @@ function renderCoachDashboard() {
         : 'Analyze your resume to unlock readiness scoring.';
     setDeltaBadge(coachConfidenceDelta, resumeAnalysis ? confidenceDelta : 0, '%');
     if (coachSessionCount) coachSessionCount.textContent = String(memory.session_count || 0);
+    if (coachDailyGain) coachDailyGain.textContent = `+${Math.round(dailySnapshot.points || 0)} today`;
+    if (coachReadyState) {
+        coachReadyState.textContent = resumeAnalysis && confidence >= 85
+            ? 'Your resume looks ready. Next, practice your strongest stories in an interview round.'
+            : latestScore >= 8
+                ? 'Your interview answers are improving. Push into deeper follow-up questions today.'
+                : dailySnapshot.lastEvent
+                    ? `Latest progress: ${dailySnapshot.lastEvent}. Keep going with one more focused step.`
+                    : 'Your coach will turn today\'s resume and interview signals into a simple next step.';
+    }
+    if (coachNextActionCopy) coachNextActionCopy.textContent = nextActionCopy;
+    if (coachNextActionBtn) {
+        coachNextActionBtn.dataset.action = nextActionType;
+        coachNextActionBtn.dataset.issueId = nextIssue?.id || '';
+        coachNextActionBtn.innerHTML = nextActionType === 'resume_fix'
+            ? '<i class="fa-solid fa-wand-magic-sparkles"></i> Fix Resume'
+            : '<i class="fa-solid fa-microphone-lines"></i> Start Interview';
+    }
 
     renderCoachControls(coachState.modes);
     renderCoachDailyPlan(plan);
@@ -2087,12 +2459,12 @@ function renderCoachControls(modesData) {
 }
 
 function renderCoachDailyPlan(plan) {
-    if (coachPlanHeadline) coachPlanHeadline.textContent = plan?.headline || 'Your plan is ready when your coach memory loads.';
+    if (coachPlanHeadline) coachPlanHeadline.textContent = plan?.headline || 'Your plan will appear here.';
     if (coachPlanNote) coachPlanNote.textContent = plan?.coach_note || 'Start with one resume fix or one interview answer today.';
     if (!coachDailyTasks) return;
     const tasks = Array.isArray(plan?.tasks) ? plan.tasks : [];
     if (!tasks.length) {
-        coachDailyTasks.innerHTML = '<p class="empty-state">No daily tasks yet. Start an interview or analyze your resume to generate a plan.</p>';
+        coachDailyTasks.innerHTML = '<p class="empty-state">No plan yet. Analyze your resume or start an interview to generate one.</p>';
         return;
     }
     coachDailyTasks.innerHTML = tasks.map((task, index) => `
@@ -2110,11 +2482,11 @@ function renderCoachDailyPlan(plan) {
 function renderCoachWeakAreas(areas) {
     if (!coachWeakAreas) return;
     if (!Array.isArray(areas) || !areas.length) {
-        coachWeakAreas.innerHTML = '<p class="empty-state">No weak-area memory yet. Start a resume-aware interview to build it.</p>';
+        coachWeakAreas.innerHTML = '<p class="empty-state">No weak areas saved yet. Start a resume-based interview to build this list.</p>';
         if (coachWeakDrill) {
             coachWeakDrill.innerHTML = `
                 <strong>Next drill</strong>
-                <p>Finish one resume-aware interview answer and your next focused drill will appear here.</p>
+                <p>Answer one interview question and the next drill will appear here.</p>
             `;
         }
         return;
@@ -2130,7 +2502,7 @@ function renderCoachWeakAreas(areas) {
     if (coachWeakDrill) {
         coachWeakDrill.innerHTML = `
             <strong>Next drill</strong>
-            <p>Pressure-test <span>${nextArea}</span> with one focused weak-area round. This is the fastest way to turn a known weakness into a stable strength.</p>
+            <p>Practice <span>${nextArea}</span> with one focused round. It is the fastest way to improve a repeated weak spot.</p>
             <button class="btn-outline coach-drill-btn" data-area="${nextArea}">
                 <i class="fa-solid fa-bullseye"></i> Start Weak-Area Drill
             </button>
@@ -2167,67 +2539,30 @@ function renderCoachTrends(scoreTrend, currentConfidence) {
 function renderCoachFeedback(feedbackData) {
     if (!coachFeedbackSummary) return;
     if (!feedbackData) {
-        coachFeedbackSummary.innerHTML = '<p class="empty-state">Complete an interview answer to see score reasoning and next improvements.</p>';
+        coachFeedbackSummary.innerHTML = '<p class="empty-state">Answer one interview question to see your latest feedback here.</p>';
         return;
     }
-    const evaluation = feedbackData.evaluation || {};
-    const score = evaluation.score ?? feedbackData.score ?? '--';
-    const why = evaluation.improvement || evaluation.improvements || feedbackData.feedback || 'Keep adding specific examples, tradeoffs, and measurable outcomes.';
+    const evaluation = feedbackData.feedback || feedbackData.evaluation || {};
+    const score = evaluation.score ?? feedbackData.evaluation?.score ?? feedbackData.score ?? '--';
+    const why = evaluation.how_to_improve || evaluation.improvement || feedbackData.feedback || 'Keep adding specific examples, tradeoffs, and measurable outcomes.';
+    const strengths = Array.isArray(evaluation.what_went_well) ? evaluation.what_went_well.slice(0, 2) : (Array.isArray(evaluation.strengths) ? evaluation.strengths.slice(0,2) : []);
+    const weaknesses = Array.isArray(evaluation.what_was_missing) ? evaluation.what_was_missing.slice(0, 2) : (Array.isArray(evaluation.weaknesses) ? evaluation.weaknesses.slice(0,2) : []);
     const missing = Array.isArray(evaluation.missing_concepts) ? evaluation.missing_concepts : [];
+    const verdict = feedbackData.final_verdict || feedbackData.verdict || null;
+    const verdictNote = verdict ? `<div class="coach-final-verdict"><strong>${sanitize(String(verdict))}</strong><p>${sanitize(feedbackData.verdict_explanation || '')}</p></div>` : '';
+
     coachFeedbackSummary.innerHTML = `
+        ${verdictNote}
         <div class="coach-feedback-score"><i class="fa-solid fa-star"></i> ${sanitize(String(score))}/10</div>
         <p><strong>Why:</strong> ${sanitize(why)}</p>
         ${feedbackData.focus_area ? `<p><strong>Focus:</strong> ${sanitize(feedbackData.focus_area)}</p>` : ''}
+        ${strengths.length ? `<p><strong>What landed:</strong> ${sanitize(strengths.join('; '))}</p>` : ''}
+        ${weaknesses.length ? `<p><strong>What felt weak:</strong> ${sanitize(weaknesses.join('; '))}</p>` : ''}
         ${missing.length ? `<ul>${missing.map(item => `<li>${sanitize(item)}</li>`).join('')}</ul>` : ''}
     `;
 }
 
-async function startCoachInterview(overrides = {}) {
-    if (!authToken) return;
-    const role = overrides.role || coachTargetRole?.value?.trim() || resumeTargetRole?.value?.trim() || document.getElementById('interview-role')?.value?.trim() || 'Software Engineer';
-    const difficulty = Number(overrides.difficulty || parseInt(diffSlider?.value, 10) || 5);
-    const payload = {
-        role,
-        difficulty,
-        training_mode: overrides.training_mode || coachTrainingMode?.value || 'adaptive',
-        interviewer_persona: overrides.interviewer_persona || coachPersona?.value || 'balanced',
-        domain_focus: overrides.domain_focus ?? (coachDomainFocus?.value?.trim() || ''),
-    };
 
-    setButtonLoading(coachStartInterviewBtn, true, 'Starting...');
-    let optimisticBubble = null;
-    try {
-        document.querySelector('[data-pane="pane-interview"]')?.click();
-        openChatView(payload.role, payload.difficulty);
-        optimisticBubble = appendMsg(
-            'ai',
-            `Building your ${payload.training_mode.replace(/_/g, ' ')} session from resume signals, weak areas, and coach memory...`
-        );
-        const data = await apiJSON('/api/interview/start-from-resume', {
-            method: 'POST',
-            body: JSON.stringify(payload),
-        });
-        optimisticBubble?.remove();
-        interviewSessionId = data.session_id;
-        scores = [];
-        if (document.getElementById('interview-role')) document.getElementById('interview-role').value = data.role || role;
-        if (diffSlider) {
-            diffSlider.value = String(data.difficulty || difficulty);
-            diffLabel.textContent = String(data.difficulty || difficulty);
-        }
-        openChatView(data.role || role, data.difficulty || difficulty);
-        appendMsg('ai', data.question || 'Let us begin with your most relevant experience.');
-        showToast('Personalized interview started from your Resume Lab.', 'success');
-        loadSessionsList();
-        await loadCoachDashboard(true);
-    } catch (err) {
-        optimisticBubble?.remove();
-        appendMsg('feedback', 'The personalized interview did not start this time. Try again in a moment and we will rebuild the session.');
-        showToast(err.message || 'Could not start personalized interview.', 'error');
-    } finally {
-        setButtonLoading(coachStartInterviewBtn, false);
-    }
-}
 
 if (resumeScoreContainer) {
     resumeScoreContainer.addEventListener('click', async e => {
@@ -2331,6 +2666,20 @@ if (coachWeakDrill) {
     });
 }
 
+if (coachNextActionBtn) {
+    coachNextActionBtn.addEventListener('click', async () => {
+        const action = coachNextActionBtn.dataset.action || 'interview';
+        const issueId = coachNextActionBtn.dataset.issueId || '';
+        if (action === 'resume_fix' && issueId) {
+            document.querySelector('[data-pane="pane-resume"]')?.click();
+            await loadResumeLab(false);
+            await applyResumeIssue(issueId, coachNextActionBtn);
+            return;
+        }
+        startCoachInterview();
+    });
+}
+
 const startBtn        = document.getElementById('start-interview-btn');
 const newInterviewBtn = document.getElementById('new-interview-btn');
 const activeDiv       = document.getElementById('studio-active');
@@ -2340,7 +2689,15 @@ const answerInput     = document.getElementById('interview-answer-input');
 const emptyState      = document.getElementById('chat-empty-state');
 const diffSlider      = document.getElementById('interview-diff');
 const diffLabel       = document.getElementById('diff-label');
+const interviewPersonaSelect = document.getElementById('interview-persona');
 const sessionsList    = document.getElementById('sessions-list');
+const chatPersonaBadge = document.getElementById('chat-persona-badge');
+const chatPressureBadge = document.getElementById('chat-pressure-badge');
+const chatFocusBadge = document.getElementById('chat-focus-badge');
+const chatTurnCounter = document.getElementById('chat-turn-counter');
+const chatLiveNote = document.getElementById('chat-live-note');
+const chatAnswerHint = document.getElementById('chat-answer-hint');
+const chatFullscreenBtn = document.getElementById('chat-fullscreen-btn');
 let scores = [];
 let activeSidebarItem = null;
 
@@ -2368,19 +2725,26 @@ answerInput.addEventListener('keydown', e => {
 startBtn.addEventListener('click', async () => {
     const role = document.getElementById('interview-role').value.trim() || 'Software Engineer';
     const diff = parseInt(diffSlider?.value) || 5;
+    const interviewer_persona = interviewPersonaSelect?.value || 'strict';
 
     setStartBtnLoading(true);
     try {
+        requestInterviewFullscreen();
         const data = await apiJSON('/api/interview/start', {
             method: 'POST',
-            body: JSON.stringify({ role, difficulty: diff, weak_areas: [] }),
+            body: JSON.stringify({ role, difficulty: diff, weak_areas: [], interviewer_persona }),
         });
 
         interviewSessionId = data.session_id;
         scores = [];
 
-        openChatView(role, diff);
-        appendMsg('ai', data.question);
+        openChatView(data.role || role, data.difficulty || diff, data);
+        if (data.session_intro) {
+            appendMsg('ai', data.session_intro, null, false, data);
+            await wait(180);
+        }
+        appendMsg('ai', formatInterviewerTurn(data), null, false, data);
+        recordDailyProgress(3, 'Started manual interview session');
         loadSessionsList();  // refresh sidebar
     } catch (err) {
         showToast(err.message, 'error');
@@ -2401,6 +2765,8 @@ newInterviewBtn.addEventListener('click', () => {
     document.getElementById('interview-role').value = '';
     diffSlider.value = 5;
     diffLabel.textContent = '5';
+    if (interviewPersonaSelect) interviewPersonaSelect.value = 'strict';
+    updateInterviewStageMeta({ interviewer_persona: 'strict', pressure_level: 'medium', focus_area: 'opening', session_turn: 0 });
 });
 
 // ── Submit answer ────────────────────────────────────────────
@@ -2420,19 +2786,39 @@ submitAnswerBtn.addEventListener('click', async () => {
             method: 'POST',
             body: JSON.stringify({ session_id: interviewSessionId, answer: ans }),
         });
+
+        // Replace typing indicator with animated feedback and typed follow-up
         removeTyping(typingId);
 
-        const score = data.evaluation?.score ?? null;
-        const feedback = data.evaluation?.improvements || data.evaluation?.improvement || data.interviewer_signal || '';
+        const score = data.feedback?.score ?? data.evaluation?.score ?? data.score ?? null;
+        const feedbackText = formatInterviewFeedbackMessage(data);
 
-        if (feedback) appendMsg('feedback', feedback, score);
-        if (data.next_question) appendMsg('ai', data.next_question);
+        // Animated feedback bubble
+        const fbWrap = appendMsg('feedback', '', score, false, { focus_area: data.focus_area });
+        const fbBubble = fbWrap.querySelector('.msg-bubble');
+        await typeOutMessage(fbBubble, feedbackText, { pressure: data.pressure_level || data.persona?.pressure });
+
+        // Update coach state and UI
         coachState.latestFeedback = data;
         renderCoachFeedback(data);
         loadCoachDashboard(true);
+        updateInterviewStageMeta(data);
+        recordDailyProgress(Math.max(2, Number(score) || 0), `Completed interview turn ${Number(data.session_turn || scores.length + 1)}`);
+
+        // Animated next question (with possible interruption)
+        if (data.next_question) {
+            await wait(220 + Math.random() * 240);
+            const aiWrap = appendMsg('ai', '', null, false, data);
+            const aiBubble = aiWrap.querySelector('.msg-bubble');
+            await typeOutMessage(aiBubble, formatInterviewerTurn(data), {
+                pressure: data.pressure_level || data.persona?.pressure,
+                interruption_text: data.interviewer_signal || 'Be specific about the decision you made.',
+                meta: data,
+            });
+        }
 
         if (score !== null) {
-            scores.push(score);
+            scores.push(Number(score));
             const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
             document.getElementById('chat-score-display').textContent = `Avg Score: ${avg.toFixed(1)}/10`;
         }
@@ -2551,35 +2937,61 @@ function openChatView(role, diff) {
     document.getElementById('chat-score-display').textContent = '';
 }
 
-function appendMsg(role, content, score = null, noScroll = false) {
-    const wrap = document.createElement('div');
-    wrap.className = `msg ${role}`;
-
-    const senderMap = { ai: '<i class="fa-solid fa-robot"></i> Jobify AI', user: 'You', feedback: '<i class="fa-solid fa-check-circle"></i> AI Analysis' };
-    wrap.innerHTML = `
-        <span class="msg-sender">${senderMap[role] || role}</span>
-        <div class="msg-bubble">${sanitize(content)}</div>
-        ${score !== null && role === 'feedback' ? `<span class="msg-score-pill"><i class="fa-solid fa-star"></i> ${score}/10</span>` : ''}`;
-
-    chatMessages.appendChild(wrap);
-    if (!noScroll) chatMessages.scrollTop = chatMessages.scrollHeight;
-    return wrap;
-}
-
-function appendTyping() {
+// Typing helpers: modern animated typing and safe removal
+function appendTyping(meta = {}) {
     const id = 'typing-' + Date.now();
     const wrap = document.createElement('div');
-    wrap.className = 'msg ai';
+    wrap.className = 'msg ai typing-placeholder';
     wrap.id = id;
     wrap.innerHTML = `
-        <span class="msg-sender"><i class="fa-solid fa-robot"></i> Jobify AI</span>
+        <span class="msg-sender"><i class="fa-solid fa-user-tie"></i> Interviewer</span>
         <div class="msg-bubble"><div class="typing-dots"><span></span><span></span><span></span></div></div>`;
     chatMessages.appendChild(wrap);
     chatMessages.scrollTop = chatMessages.scrollHeight;
     return id;
 }
 
-function removeTyping(id) { document.getElementById(id)?.remove(); }
+function removeTyping(id) { const el = document.getElementById(id); if (el) el.remove(); }
+
+// Type out message with optional interruption and pressure-aware pacing
+async function typeOutMessage(bubbleEl, text, options = {}) {
+    if (!bubbleEl) return;
+    const pressure = String((options.pressure_level || options.pressure || 'medium')).toLowerCase();
+    const baseDelay = pressure === 'high' ? 8 : pressure === 'low' ? 26 : 14;
+    const charDelay = Math.max(6, Math.min(40, baseDelay));
+    const shouldInterrupt = pressure === 'high' && String(text || '').length > 80 && Math.random() < 0.35;
+
+    function findSplitIndex(t, minIdx, maxIdx) {
+        const slice = t.slice(minIdx, Math.min(maxIdx, t.length));
+        const m = slice.match(/[\.!?]/);
+        if (m) return minIdx + slice.indexOf(m[0]) + 1;
+        return Math.min(maxIdx, t.length - 1);
+    }
+
+    bubbleEl.innerText = '';
+
+    if (shouldInterrupt) {
+        const split = findSplitIndex(text, 40, Math.min(120, Math.floor(text.length * 0.6)));
+        for (let i = 1; i <= split; i++) { bubbleEl.innerText = text.slice(0, i); await wait(charDelay); }
+        // small pause then show interruption
+        await wait(220);
+        appendMsg('ai', options.interruption_text || 'Hold on — be specific about the exact decision you made.', null);
+        await wait(420);
+        const secondWrap = appendMsg('ai', '', null, false, options.meta || {});
+        const secondBubble = secondWrap.querySelector('.msg-bubble');
+        for (let i = split + 1; i <= text.length; i++) { secondBubble.innerText = text.slice(split, i); await wait(charDelay); }
+        secondBubble.innerText = text.slice(split);
+        return;
+    }
+
+    for (let i = 1; i <= (text || '').length; i++) {
+        bubbleEl.innerText = text.slice(0, i);
+        await wait(charDelay);
+    }
+    bubbleEl.innerText = text;
+}
+
+
 
 function setStartBtnLoading(loading) {
     startBtn.disabled = loading;
@@ -2587,6 +2999,470 @@ function setStartBtnLoading(loading) {
         ? '<i class="fa-solid fa-spinner fa-spin"></i> Starting...'
         : '<i class="fa-solid fa-play"></i> Start Interview';
 }
+
+function requestInterviewFullscreen() {
+    const pane = document.getElementById('pane-interview');
+    document.body.classList.add('interview-live');
+    if (!pane || document.fullscreenElement) return;
+    const request = pane.requestFullscreen || pane.webkitRequestFullscreen || pane.msRequestFullscreen;
+    if (typeof request === 'function') {
+        Promise.resolve(request.call(pane)).catch(() => {});
+    }
+}
+
+function formatInterviewerTurn(data = {}) {
+    const question = String(data.next_question || data.question || 'Walk me through your reasoning.').trim();
+    const focusArea = String(data.focus_area || 'role fundamentals').trim();
+    const signal = String(data.interviewer_signal || 'I will push for specifics.').trim();
+    const expectation = String(
+        data.answer_expectation || 'Answer in 5-10 lines with context, decisions, tradeoffs, and measurable outcome.'
+    ).trim();
+    const pressure = String(data.pressure_level || data.persona?.pressure || 'medium').toLowerCase();
+    const toneNote = pressure === 'high'
+        ? 'Tone: demanding — be concise; expect interruptions and rapid follow-ups.'
+        : pressure === 'low' || pressure === 'friendly'
+            ? 'Tone: supportive — take a beat and explain clearly.'
+            : 'Tone: professional and direct.';
+    return [
+        toneNote,
+        question,
+        `Focus: ${focusArea}.`,
+        `Interviewer signal: ${signal}`,
+        `Answer target: ${expectation}`,
+    ].join('\n\n');
+}
+
+function formatInterviewFeedbackMessage(data = {}) {
+    if (data.feedback_message) return String(data.feedback_message).trim();
+
+    // Prefer structured feedback if available
+    if (data.feedback && typeof data.feedback === 'object') {
+        const f = data.feedback;
+        const score = f.score ?? data.evaluation?.score ?? data.score ?? '--';
+        const well = Array.isArray(f.what_went_well) ? f.what_went_well.filter(Boolean) : [];
+        const missing = Array.isArray(f.missing_concepts) ? f.missing_concepts.filter(Boolean) : [];
+        const missingNote = missing.length ? `Missing depth: ${missing.slice(0, 2).join(', ')}` : '';
+        const improvement = f.how_to_improve || f.improvement || 'Use one concrete example, your decision, and the outcome.';
+        const lines = [
+            `Score: ${score}/10`,
+            `What went well: ${well[0] || 'You attempted the question directly.'}`,
+            `What was missing: ${Array.isArray(f.what_was_missing) && f.what_was_missing[0] ? f.what_was_missing[0] : 'More specifics needed.'}`,
+            missingNote,
+            `Next focus: ${f.next_focus || data.focus_area || 'specific evidence'}`,
+            `How to improve: ${improvement}`,
+        ].filter(Boolean);
+        return lines.join('\n');
+    }
+
+    const evaluation = data.evaluation || {};
+    const score = evaluation.score ?? data.score ?? '--';
+    const strengths = Array.isArray(evaluation.strengths) ? evaluation.strengths.filter(Boolean) : [];
+    const weaknesses = Array.isArray(evaluation.weaknesses) ? evaluation.weaknesses.filter(Boolean) : [];
+    const missing = Array.isArray(evaluation.missing_concepts) ? evaluation.missing_concepts.filter(Boolean) : [];
+    const improvement = evaluation.improvement || evaluation.improvements || 'Use one concrete example, your decision, and the outcome.';
+    const lines = [
+        `Score: ${score}/10`,
+        `What landed: ${strengths[0] || 'You attempted the question directly.'}`,
+        `What felt weak: ${weaknesses[0] || 'The answer still needs clearer specifics.'}`,
+        missing.length ? `Missing depth: ${missing.slice(0, 2).join(', ')}` : '',
+        `Next target: ${data.focus_area || evaluation.next_answer_focus || 'specific evidence'}`,
+        `Upgrade your next answer: ${improvement}`,
+    ].filter(Boolean);
+    return lines.join('\n');
+}
+
+function updateInterviewStageMeta(meta = {}) {
+    const personaKey = String(meta.interviewer_persona || meta.persona_key || interviewPersonaSelect?.value || 'balanced')
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, char => char.toUpperCase());
+    const pressure = String(meta.pressure_level || meta.persona?.pressure || 'medium');
+    const focus = String(meta.focus_area || 'opening').trim();
+    const turnCount = Number(meta.session_turn || scores.length || 0);
+    const expectation = String(
+        meta.answer_expectation || 'Answer in 5-10 lines with context, decisions, tradeoffs, and measurable outcome.'
+    ).trim();
+
+    if (chatPersonaBadge) chatPersonaBadge.textContent = personaKey;
+    if (chatPressureBadge) chatPressureBadge.textContent = `Pressure: ${pressure}`;
+    if (chatFocusBadge) chatFocusBadge.textContent = `Focus: ${focus}`;
+    if (chatTurnCounter) chatTurnCounter.textContent = `Turn ${turnCount}`;
+    if (chatAnswerHint) chatAnswerHint.textContent = `Answer target: ${expectation}`;
+    if (chatLiveNote) {
+        chatLiveNote.textContent = meta.interviewer_signal
+            ? `Live interviewer cue: ${meta.interviewer_signal}`
+            : 'Live panel ready. Expect detailed follow-ups and evidence-based pressure.';
+    }
+}
+
+function renderSessionMessage(message, noScroll = true) {
+    if (!message || !message.role) return;
+    if (message.role === 'ai') {
+        appendMsg('ai', formatInterviewerTurn({
+            question: message.content,
+            focus_area: message.focus_area,
+            interviewer_signal: message.interviewer_signal,
+            pressure_level: message.pressure_level,
+            answer_expectation: message.answer_expectation,
+        }), null, noScroll, message);
+        return;
+    }
+    if (message.role === 'feedback') {
+        appendMsg('feedback', message.content, message.score ?? null, noScroll, message);
+        return;
+    }
+    appendMsg(message.role, message.content, message.score ?? null, noScroll, message);
+}
+
+function openChatView(role, diff, meta = {}) {
+    emptyState.classList.add('hidden');
+    activeDiv.classList.remove('hidden');
+    chatMessages.innerHTML = '';
+    document.getElementById('chat-role-label').textContent = role;
+    document.getElementById('chat-diff-badge').textContent = `Difficulty ${diff}/10`;
+    document.getElementById('chat-score-display').textContent = '';
+    updateInterviewStageMeta({ ...meta, difficulty: diff });
+}
+
+function appendMsg(role, content, score = null, noScroll = false, meta = {}) {
+    const wrap = document.createElement('div');
+    wrap.className = `msg ${role}`;
+
+    const senderMap = {
+        ai: '<i class="fa-solid fa-user-tie"></i> Interviewer',
+        user: 'You',
+        feedback: '<i class="fa-solid fa-square-poll-vertical"></i> Coach Debrief',
+    };
+    const metaBits = [];
+    if (role === 'ai' && meta.pressure_level) metaBits.push(`Pressure ${sanitize(String(meta.pressure_level))}`);
+    if (role === 'ai' && meta.focus_area) metaBits.push(`Focus ${sanitize(String(meta.focus_area))}`);
+    if (role === 'feedback' && meta.focus_area) metaBits.push(`Target ${sanitize(String(meta.focus_area))}`);
+    // Emotion indicator for feedback
+    let emotion = '';
+    if (role === 'feedback' && score !== null) {
+        const n = Number(score);
+        if (!Number.isNaN(n)) emotion = n >= 8 ? '👏' : n >= 5 ? '🤔' : '⚠️';
+    }
+
+    wrap.innerHTML = `
+        <span class="msg-sender">${senderMap[role] || role} ${emotion ? `<span class="msg-emotion">${emotion}</span>` : ''}</span>
+        <div class="msg-bubble">${sanitize(content)}</div>
+        ${metaBits.length ? `<div class="msg-meta-row">${metaBits.map(item => `<span class="msg-meta-pill">${item}</span>`).join('')}</div>` : ''}
+        ${score !== null && role === 'feedback' ? `<span class="msg-score-pill"><i class="fa-solid fa-star"></i> ${score}/10</span>` : ''}`;
+
+    chatMessages.appendChild(wrap);
+    if (!noScroll) chatMessages.scrollTop = chatMessages.scrollHeight;
+    return wrap;
+}
+
+async function loadSessionHistory(sessionDbId, role, difficulty, sidebarEl) {
+    try {
+        requestInterviewFullscreen();
+        const res = await fetch(`/api/interview/sessions/${sessionDbId}`, { headers: getAuthHeaders() });
+        if (!res.ok) return;
+        const data = await readResponseData(res);
+
+        interviewSessionId = data.session_token || null;
+        scores = data.messages
+            .filter(message => message.role === 'feedback' && message.score !== undefined)
+            .map(message => Number(message.score));
+
+        const lastAi = [...(data.messages || [])].reverse().find(message => message.role === 'ai') || {};
+        openChatView(role, difficulty, {
+            interviewer_persona: data.interviewer_persona,
+            focus_area: lastAi.focus_area || data.personalization_context?.current_focus_area,
+            pressure_level: lastAi.pressure_level,
+            answer_expectation: lastAi.answer_expectation,
+            session_turn: (data.messages || []).filter(message => message.role === 'user').length,
+        });
+        chatMessages.innerHTML = '';
+
+        (data.messages || []).forEach(message => renderSessionMessage(message, true));
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+
+        if (scores.length > 0) {
+            const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
+            document.getElementById('chat-score-display').textContent = `Avg Score: ${avg.toFixed(1)}/10`;
+        }
+
+        if (activeSidebarItem) activeSidebarItem.classList.remove('active');
+        sidebarEl.classList.add('active');
+        activeSidebarItem = sidebarEl;
+    } catch (err) {
+        showToast('Failed to load session history', 'error');
+    }
+}
+
+function renderJobsFeedSummary(feedMeta = {}) {
+    const summary = feedMeta.summary || {};
+    const roleMix = Array.isArray(summary.role_mix) ? summary.role_mix : Array.isArray(feedMeta.suggested_roles) ? feedMeta.suggested_roles : [];
+
+    if (jobsFeedHeadline) jobsFeedHeadline.textContent = summary.headline || 'Your best matches are ready.';
+    if (jobsFeedNote) jobsFeedNote.textContent = summary.note || 'Each card explains fit, gaps, and next steps.';
+    if (jobsRoleMix) {
+        jobsRoleMix.innerHTML = roleMix.length
+            ? roleMix.slice(0, 4).map(role => `<span class="jobs-role-chip">${sanitize(role)}</span>`).join('')
+            : '<span class="jobs-role-chip">Waiting</span>';
+    }
+    if (jobsGapFocus) jobsGapFocus.textContent = summary.top_gap || '--';
+    if (jobsGapNote) jobsGapNote.textContent = summary.top_gap_note || 'Your main gap will show here.';
+    if (jobsBestMatch) jobsBestMatch.textContent = summary.best_match || '--';
+    if (jobsBestMatchNote) jobsBestMatchNote.textContent = summary.best_match_note || 'Your strongest match will show here.';
+}
+
+function renderJobs(jobs, feedMeta = {}) {
+    renderJobsFeedSummary(feedMeta);
+    jobsContainer.innerHTML = '';
+    if (!jobs.length) {
+        jobsContainer.innerHTML = '<p class="empty-state">No strong matches found yet. Try again after updating your resume.</p>';
+        return;
+    }
+
+    jobsContainer.innerHTML = jobs.map(job => {
+        const title = sanitize(job.role || job.title || 'Unknown Role');
+        const company = sanitize(job.company || 'Unknown Company');
+        const location = sanitize(job.location || 'Location unavailable');
+        const score = Number(job.match_score) || 0;
+        const why = sanitize(job.why_match || job.reason || 'This role aligns with your current resume strengths.');
+        const gap = sanitize(job.gap_summary || 'No major gap flagged.');
+        const improve = sanitize(job.improvement_plan || job.action_plan || 'Keep strengthening your strongest proof points.');
+        const link = job.link || job.url || '#';
+        const fitBucket = sanitize(String(job.fit_bucket || 'close').replace(/\b\w/g, char => char.toUpperCase()));
+        const sourceRole = sanitize(job.source_role || '');
+        const matchedSkills = Array.isArray(job.matched_skills) ? job.matched_skills.slice(0, 5) : [];
+        const missingSkills = Array.isArray(job.missing_skills) ? job.missing_skills.slice(0, 5) : [];
+
+        return `
+            <article class="crm-job-card premium-job-card">
+                <div class="job-card-top">
+                    <div>
+                        <span class="job-fit-bucket">${fitBucket} fit</span>
+                        <h3>${title}</h3>
+                        <p><i class="fa-solid fa-building"></i> ${company} <span class="job-location-sep">•</span> ${location}</p>
+                    </div>
+                    <div class="job-match-cluster">
+                        <span class="deep-match-badge">Match ${score}%</span>
+                        ${sourceRole ? `<span class="job-role-source">Track: ${sourceRole}</span>` : ''}
+                    </div>
+                </div>
+                <div class="job-reason-grid">
+                    <div class="job-reason-card">
+                        <span class="job-reason-label">Why it fits</span>
+                        <p>${why}</p>
+                    </div>
+                    <div class="job-reason-card">
+                        <span class="job-reason-label">Main gap</span>
+                        <p>${gap}</p>
+                    </div>
+                    <div class="job-reason-card">
+                        <span class="job-reason-label">How to improve</span>
+                        <p>${improve}</p>
+                    </div>
+                </div>
+                <div class="job-chip-group">
+                    <span class="job-chip-label">Matched</span>
+                    <div class="job-chip-row">
+                        ${matchedSkills.length ? matchedSkills.map(skill => `<span class="job-skill-chip matched">${sanitize(skill)}</span>`).join('') : '<span class="job-skill-chip matched">Potential fit</span>'}
+                    </div>
+                </div>
+                <div class="job-chip-group">
+                    <span class="job-chip-label">Missing / under-proven</span>
+                    <div class="job-chip-row">
+                        ${missingSkills.length ? missingSkills.map(skill => `<span class="job-skill-chip missing">${sanitize(skill)}</span>`).join('') : '<span class="job-skill-chip missing">No major gap flagged</span>'}
+                    </div>
+                </div>
+                <div class="card-footer-row job-card-actions">
+                    <button class="btn-outline track-btn" data-company="${company}" data-title="${title}" data-url="${sanitize(link)}">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i> Save Job &amp; Tailor Resume
+                    </button>
+                    <a href="${sanitize(link)}" target="_blank" rel="noopener" class="view-link">View Job <i class="fa-solid fa-arrow-right"></i></a>
+                </div>
+            </article>
+        `;
+    }).join('');
+
+    jobsContainer.onclick = event => {
+        const btn = event.target.closest('.track-btn');
+        if (btn) trackJob(btn.dataset.company, btn.dataset.title, btn.dataset.url);
+    };
+}
+
+async function loadDailyFeed() {
+    switchPage('page-loading');
+    const loadingText = document.getElementById('loading-text');
+    const steps = [
+        'Reading your resume...',
+        'Finding the best role matches...',
+        'Fetching live openings...',
+        'Explaining fit, gaps, and next steps...',
+        'Finalizing your job matches...'
+    ];
+    let stepIdx = 0;
+    loadingText.innerText = steps[0];
+    const stepTimer = setInterval(() => {
+        stepIdx = Math.min(stepIdx + 1, steps.length - 1);
+        loadingText.innerText = steps[stepIdx];
+    }, 6500);
+
+    try {
+        const res = await fetch('/api/jobs/feed', { headers: getAuthHeaders() });
+        const data = await readResponseData(res);
+        clearInterval(stepTimer);
+        if (!res.ok) throw new Error(getErrorMessage(data, 'Feed error'));
+        renderJobs(data.jobs || [], data);
+        switchPage('page-results');
+        loadCoachDashboard(false);
+        loadTracker();
+        return true;
+    } catch (err) {
+        clearInterval(stepTimer);
+        renderJobs([], {});
+        switchPage('page-results');
+        showToast('Job feed unavailable right now: ' + err.message, 'error');
+        return false;
+    }
+}
+
+function renderResumePreview() {
+    if (!resumeDraftPreview) return;
+
+    const showingBefore = resumeCompareView === 'before';
+    const previewText = showingBefore
+        ? (resumeLabState.original_resume || resumeLabState.current_resume || '')
+        : (resumeLabState.current_resume || resumeLabState.original_resume || '');
+    const hasParsedResume = resumeLabState.parsed_resume && Object.keys(resumeLabState.parsed_resume).length > 0;
+    const parsedResume = showingBefore
+        ? parseResumeTextForPreview(previewText)
+        : (hasParsedResume ? normalizeParsedResume(resumeLabState.parsed_resume, previewText) : parseResumeTextForPreview(previewText));
+    const appliedSet = new Set((resumeLabState.applied_fixes || []).map(fix => repairResumeDisplayText(fix.improved || '')));
+    const recentHighlightSet = new Set((resumeLabState.ui?.recentHighlightLines || []).map(line => repairResumeDisplayText(String(line || '')).trim()));
+    const sections = [
+        ['Summary', parsedResume.summary ? [parsedResume.summary] : []],
+        ['Experience', parsedResume.experience || []],
+        ['Projects', parsedResume.projects || []],
+        ['Skills', parsedResume.skills || []],
+    ];
+
+    const sectionMarkup = sections
+        .filter(([, items]) => Array.isArray(items) && items.length)
+        .map(([label, items]) => {
+            if (label === 'Summary') {
+                const itemText = repairResumeDisplayText(String(items[0] || ''));
+                const isApplied = !showingBefore && appliedSet.has(itemText);
+                const isFresh = !showingBefore && recentHighlightSet.has(itemText.trim());
+                return `
+                    <section class="resume-paper-section">
+                        <h4>${sanitize(label)}</h4>
+                        <p>${isApplied ? `<span class="updated-line ${isFresh ? 'fresh-highlight' : ''}">${sanitize(itemText)}</span>` : sanitize(itemText)}</p>
+                    </section>
+                `;
+            }
+
+            return `
+                <section class="resume-paper-section">
+                    <h4>${sanitize(label)}</h4>
+                    <ul>
+                        ${items.map(item => {
+                            const itemText = repairResumeDisplayText(String(item || ''));
+                            const isApplied = !showingBefore && appliedSet.has(itemText);
+                            const isFresh = !showingBefore && recentHighlightSet.has(itemText.trim());
+                            return `<li>${isApplied ? `<span class="updated-line ${isFresh ? 'fresh-highlight' : ''}">${sanitize(itemText)}</span>` : sanitize(itemText)}</li>`;
+                        }).join('')}
+                    </ul>
+                </section>
+            `;
+        }).join('');
+
+    if (resumeCompareToggle) {
+        resumeCompareToggle.querySelectorAll('[data-compare-view]').forEach(button => {
+            button.classList.toggle('active', button.dataset.compareView === resumeCompareView);
+        });
+    }
+
+    resumeDraftPreview.innerHTML = `
+        <article class="resume-paper ${showingBefore ? 'is-before' : 'is-after'}">
+            <div class="resume-paper-head">
+                <div>
+                    <span class="resume-paper-label">${showingBefore ? 'Original Draft' : 'Improved Draft'}</span>
+                    <strong>${showingBefore ? 'Before changes' : 'Readable recruiter view'}</strong>
+                </div>
+                <span class="resume-paper-status">${showingBefore ? 'Reference copy' : `${getAppliedIssueIds().size} fixes applied`}</span>
+            </div>
+            ${sectionMarkup || '<p class="empty-state">Your live resume preview will appear here.</p>'}
+        </article>
+    `;
+}
+
+async function startCoachInterview(overrides = {}) {
+    if (!authToken) return;
+    const role = overrides.role || coachTargetRole?.value?.trim() || resumeTargetRole?.value?.trim() || document.getElementById('interview-role')?.value?.trim() || 'Software Engineer';
+    const difficulty = Number(overrides.difficulty || parseInt(diffSlider?.value, 10) || 5);
+    const payload = {
+        role,
+        difficulty,
+        training_mode: overrides.training_mode || coachTrainingMode?.value || 'adaptive',
+        interviewer_persona: overrides.interviewer_persona || coachPersona?.value || interviewPersonaSelect?.value || 'strict',
+        domain_focus: overrides.domain_focus ?? (coachDomainFocus?.value?.trim() || ''),
+    };
+
+    setButtonLoading(coachStartInterviewBtn, true, 'Starting...');
+    let optimisticBubble = null;
+    try {
+        document.querySelector('[data-pane="pane-interview"]')?.click();
+        requestInterviewFullscreen();
+        openChatView(payload.role, payload.difficulty, payload);
+        optimisticBubble = appendMsg(
+            'ai',
+            [
+                'Building your live interview panel...',
+                `Mode: ${payload.training_mode.replace(/_/g, ' ')}`,
+                `Persona: ${payload.interviewer_persona.replace(/_/g, ' ')}`,
+                'Pulling in resume evidence, weak areas, and coach memory before the first question.'
+            ].join('\n\n'),
+            null,
+            false,
+            payload,
+        );
+        const data = await apiJSON('/api/interview/start-from-resume', {
+            method: 'POST',
+            body: JSON.stringify(payload),
+        });
+        optimisticBubble?.remove();
+        interviewSessionId = data.session_id;
+        scores = [];
+        if (document.getElementById('interview-role')) document.getElementById('interview-role').value = data.role || role;
+        if (diffSlider) {
+            diffSlider.value = String(data.difficulty || difficulty);
+            diffLabel.textContent = String(data.difficulty || difficulty);
+        }
+        if (interviewPersonaSelect) interviewPersonaSelect.value = data.interviewer_persona || payload.interviewer_persona;
+        openChatView(data.role || role, data.difficulty || difficulty, data);
+        if (data.session_intro) {
+            appendMsg('ai', data.session_intro, null, false, data);
+            await wait(160);
+        }
+        appendMsg('ai', formatInterviewerTurn(data), null, false, data);
+        recordDailyProgress(5, 'Started personalized interview');
+        showToast('Personalized interview started from your Resume Lab.', 'success');
+        loadSessionsList();
+        await loadCoachDashboard(true);
+    } catch (err) {
+        optimisticBubble?.remove();
+        appendMsg('feedback', 'The personalized interview did not start this time. Try again in a moment and we will rebuild the session.');
+        showToast(err.message || 'Could not start personalized interview.', 'error');
+    } finally {
+        setButtonLoading(coachStartInterviewBtn, false);
+    }
+}
+
+if (chatFullscreenBtn) {
+    chatFullscreenBtn.addEventListener('click', requestInterviewFullscreen);
+}
+
+document.addEventListener('fullscreenchange', () => {
+    if (!document.fullscreenElement && document.querySelector('.pane.active')?.id !== 'pane-interview') {
+        document.body.classList.remove('interview-live');
+    }
+});
 
 function isTypingTarget(target) {
     if (!target) return false;
@@ -2640,8 +3516,9 @@ document.querySelectorAll('.tab').forEach(tab => {
         // Hide viewport wrapper when on fullscreen interview pane to prevent spacing issues
         const viewport = document.getElementById('scrollable-viewport');
         if (viewport) {
-            viewport.style.display = (paneId === 'pane-interview') ? 'none' : 'flex';
+            viewport.style.display = (paneId === 'pane-interview') ? 'none' : 'block';
         }
+        document.body.classList.toggle('interview-live', paneId === 'pane-interview');
 
         if (paneId === 'pane-resume') {
             loadResumeLab(false);

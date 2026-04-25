@@ -1,0 +1,37 @@
+4: * New endpoints:  /api/auth/login  /api/resume/upload
+5: *                 /api/jobs/feed   /api/jobs/track   /api/jobs/tracker
+17: login:   document.getElementById('page-login'),
+23: const loginForm    = document.getElementById('modern-login-form');
+24: const loginBtn     = document.getElementById('login-btn');
+25: const loginInput   = document.getElementById('login-username');
+26: const loginPass    = document.getElementById('login-password');
+254: const res = await fetch(url, { ...options, method, headers: mergedHeaders });
+942: // ─── Login UI Enhancements ────────────────────────────────────────────────────
+944: const type = loginPass.getAttribute('type') === 'password' ? 'text' : 'password';
+945: loginPass.setAttribute('type', type);
+951: loginInput.addEventListener('input', e => {
+956: loginInput.classList.remove('input-error');
+962: loginInput.classList.add('input-error');
+965: loginInput.classList.remove('input-error');
+970: loginPass.addEventListener('input', e => {
+989: // ─── Login Submission ──────────────────────────────────────────────────────────
+990: loginForm.addEventListener('submit', async e => {
+992: const username = loginInput.value.trim();
+993: const password = loginPass.value;
+996: const originalHTML = loginBtn.innerHTML;
+997: loginBtn.disabled = true;
+998: loginBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> <span>Authenticating...</span>';
+1001: const res = await fetch('/api/auth/login', {
+1014: showToast('Login successful.', 'success');
+1017: showLoading('Login successful. Loading your saved job feed...');
+1028: loginBtn.disabled = false;
+1029: loginBtn.innerHTML = originalHTML;
+1245: const res = await fetch('/api/jobs/feed', { headers: getAuthHeaders() });
+1310: const res = await fetch('/api/jobs/track', {
+1337: const res = await fetch('/api/jobs/tracker', { headers: getAuthHeaders() });
+2085: const res = await fetch('/api/resume/download', {
+2628: const res = await fetch('/api/interview/sessions', { headers: getAuthHeaders() });
+2662: const res = await fetch(`/api/interview/sessions/${s.id}`, {
+2689: const res = await fetch(`/api/interview/sessions/${sessionDbId}`, { headers: getAuthHeaders() });
+2950: const res = await fetch(`/api/interview/sessions/${sessionDbId}`, { headers: getAuthHeaders() });
+3097: const res = await fetch('/api/jobs/feed', { headers: getAuthHeaders() });

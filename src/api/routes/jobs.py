@@ -62,6 +62,7 @@ def get_feed(
     prefs = {
         "location": current_user.location,
         "experience": current_user.experience,
+        "target_role": current_user.target_role,
         "job_type": "Full-time",
         "work_mode": "Any",
     }

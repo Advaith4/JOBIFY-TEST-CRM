@@ -4,9 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Jobify.ai | Next-Gen Career CRM</title>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Outfit:wght@300;400;500;600;700;800&family=Source+Serif+4:wght@400;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="style.css?v=20260417">
+    <link rel="stylesheet" href="style.css?v=20260419">
 </head>
 <body>
     <div class="noise"></div>
@@ -136,9 +136,14 @@
                     </div>
                 </div>
                 
-                <button class="btn btn-primary mt-4 w-full" id="upload-db-btn" disabled>
-                    <i class="fa-solid fa-cloud-arrow-up"></i> Ingest into Jobify Core
-                </button>
+                <div class="upload-actions" style="display: flex; gap: 1rem; margin-top: 1rem;">
+                    <button class="btn btn-primary w-full" id="upload-db-btn" disabled>
+                        <i class="fa-solid fa-cloud-arrow-up"></i> Select PDF to Ingest
+                    </button>
+                    <button class="btn btn-outline w-full" id="skip-upload-btn" onclick="skipUploadAndGoToDashboard()">
+                        Skip for Now <i class="fa-solid fa-arrow-right"></i>
+                    </button>
+                </div>
             </div>
         </section>
     </main>
@@ -179,19 +184,30 @@
             <div id="pane-coach" class="pane active fade-in">
                 <div class="coach-shell">
                     <section class="coach-hero glass-card">
-                        <div>
-                            <div class="section-label"><i class="fa-solid fa-compass"></i> AI Career Coach</div>
-                            <h2>Your daily career training cockpit.</h2>
-                            <p class="muted-copy">Resume quality, interview readiness, weak-area drills, and daily tasks in one adaptive dashboard.</p>
+                        <div class="coach-hero-copy">
+                            <div class="section-label"><i class="fa-solid fa-compass"></i> Career Coach</div>
+                            <h2>One place to improve your resume and interview skills.</h2>
+                            <p class="muted-copy">Use this page to see what to fix next, start practice rounds, and keep track of daily progress.</p>
                         </div>
                         <div class="coach-hero-actions">
                             <button class="btn-modern-primary" id="coach-start-interview-btn">
-                                <i class="fa-solid fa-microphone-lines"></i> Start Personalized Interview
+                                <i class="fa-solid fa-microphone-lines"></i> Start Interview
                             </button>
                             <button class="btn-outline" id="coach-fix-resume-btn">
                                 <i class="fa-solid fa-wand-magic-sparkles"></i> Fix Resume
                             </button>
                         </div>
+                        <aside class="coach-hero-aside">
+                            <div class="coach-live-progress">
+                                <span class="coach-live-label">Today's momentum</span>
+                                <strong id="coach-daily-gain">+0 today</strong>
+                                <p id="coach-ready-state">Your coach will turn today's resume and interview signals into a clear push.</p>
+                            </div>
+                            <button class="btn-outline coach-next-action-btn" id="coach-next-action-btn">
+                                <i class="fa-solid fa-arrow-right"></i> What Should I Do Next?
+                            </button>
+                            <p id="coach-next-action-copy" class="coach-next-action-copy">Analyze your resume or answer one interview question to unlock your next move.</p>
+                        </aside>
                     </section>
 
                     <section class="coach-overview-grid">
@@ -219,7 +235,7 @@
                         <article class="coach-metric-card glass-card">
                             <span>Sessions</span>
                             <strong id="coach-session-count">0</strong>
-                            <p>Long-term coach memory improves with every session.</p>
+                            <p>Your practice history builds up here over time.</p>
                         </article>
                     </section>
 
@@ -241,8 +257,8 @@
                         </article>
 
                         <aside class="coach-control-card glass-card">
-                            <div class="section-label"><i class="fa-solid fa-sliders"></i> Coach Control Panel</div>
-                            <h3>Choose today's training style</h3>
+                            <div class="section-label"><i class="fa-solid fa-sliders"></i> Interview Settings</div>
+                            <h3>Pick how you want to practice</h3>
                             <div class="coach-control-stack">
                                 <label>
                                     <span>Training Mode</span>
@@ -283,7 +299,7 @@
 
                     <section class="coach-insight-grid">
                         <article class="coach-weak-card glass-card">
-                            <div class="section-label"><i class="fa-solid fa-crosshairs"></i> Recurring Weak Areas</div>
+                            <div class="section-label"><i class="fa-solid fa-crosshairs"></i> Weak Areas</div>
                             <div id="coach-weak-areas" class="coach-chip-list">
                                 <p class="empty-state">No weak-area memory yet.</p>
                             </div>
@@ -294,14 +310,14 @@
                         </article>
 
                         <article class="coach-trend-card glass-card">
-                            <div class="section-label"><i class="fa-solid fa-chart-line"></i> Progression</div>
-                            <h3>Score and confidence trend</h3>
+                            <div class="section-label"><i class="fa-solid fa-chart-line"></i> Progress</div>
+                            <h3>How your practice is trending</h3>
                             <div id="coach-score-trend" class="coach-trend-bars"></div>
                             <div id="coach-confidence-trend" class="coach-confidence-trend"></div>
                         </article>
 
                         <article class="coach-feedback-card glass-card">
-                            <div class="section-label"><i class="fa-solid fa-comments"></i> Latest Interview Feedback</div>
+                            <div class="section-label"><i class="fa-solid fa-comments"></i> Latest Feedback</div>
                             <div id="coach-feedback-summary">
                                 <p class="empty-state">Complete an interview answer to see score reasoning and next improvements.</p>
                             </div>
@@ -312,9 +328,34 @@
 
             <div id="pane-jobs" class="pane hidden fade-in">
                 <div class="pane-hero">
-                    <h2>Your Tailored Intel</h2>
-                    <p>Our agents have successfully cross-referenced your raw skills against today's live job market.</p>
+                    <h2>Job Matches</h2>
+                    <p>See roles that fit your resume, the main gap to close, and what to do before you apply.</p>
                 </div>
+                <section class="jobs-intel-strip glass-card">
+                    <div class="jobs-intel-primary">
+                        <div class="section-label"><i class="fa-solid fa-radar"></i> Job Summary</div>
+                        <h3 id="jobs-feed-headline">Scanning for your best matches...</h3>
+                        <p id="jobs-feed-note" class="muted-copy">Each result shows why it fits, what may block you, and how to improve your chances.</p>
+                    </div>
+                    <div class="jobs-intel-metrics">
+                        <article class="jobs-intel-card">
+                            <span>Best Roles</span>
+                            <div id="jobs-role-mix" class="jobs-role-mix">
+                                <span class="jobs-role-chip">Waiting</span>
+                            </div>
+                        </article>
+                        <article class="jobs-intel-card">
+                            <span>Top Gap To Close</span>
+                            <strong id="jobs-gap-focus">--</strong>
+                            <p id="jobs-gap-note">A personalized gap summary will appear here.</p>
+                        </article>
+                        <article class="jobs-intel-card">
+                            <span>Best Match</span>
+                            <strong id="jobs-best-match">--</strong>
+                            <p id="jobs-best-match-note">Your strongest opening will show up here.</p>
+                        </article>
+                    </div>
+                </section>
                 <div id="jobs-container" class="grid-card-layout"></div>
             </div>
 
@@ -322,9 +363,9 @@
                 <div class="resume-pane-shell">
                     <section class="resume-pane-hero glass-card">
                         <div class="resume-pane-copy">
-                            <div class="section-label"><i class="fa-solid fa-wand-magic-sparkles"></i> Resume Fix Workbench</div>
-                            <h2>See weak lines, apply better ones, and improve your resume in real time.</h2>
-                            <p class="muted-copy">Analyze your stored resume, inspect section-by-section issues, and switch into Fix Mode whenever you want to edit manually.</p>
+                            <div class="section-label"><i class="fa-solid fa-wand-magic-sparkles"></i> Resume Lab</div>
+                            <h2>Find weak lines and replace them with stronger ones.</h2>
+                            <p class="muted-copy">Analyze your saved resume, review issue cards, and edit the draft whenever you want.</p>
                         </div>
                         <div class="resume-pane-actions">
                             <button class="btn-outline" id="toggle-fix-mode-btn">
@@ -346,7 +387,7 @@
                             <div class="resume-score-summary">
                                 <p class="metric-label">Overall Score</p>
                                 <h3 id="resume-score-headline">Ready for analysis</h3>
-                                <p id="resume-score-caption" class="muted-copy">Run analysis to load your resume breakdown and issue cards.</p>
+                                <p id="resume-score-caption" class="muted-copy">Run analysis to see your score, section breakdown, and suggested fixes.</p>
                                 <div class="resume-role-row compact-role-row">
                                     <input type="text" id="resume-target-role" placeholder="e.g. Junior Flutter Developer">
                                     <button class="btn-modern-primary" id="score-resume-btn">
@@ -355,7 +396,7 @@
                                 </div>
                                 <div class="resume-confidence-meter">
                                     <div class="confidence-copy">
-                                        <span>Confidence Meter</span>
+                                        <span>Readiness</span>
                                         <strong id="resume-confidence-label">Not ready yet</strong>
                                     </div>
                                     <div class="confidence-track">
@@ -366,8 +407,8 @@
                         </article>
 
                         <article class="resume-control-card glass-card">
-                            <div class="section-label"><i class="fa-solid fa-cloud-arrow-up"></i> Replace Stored Resume</div>
-                            <p class="muted-copy">Upload a new PDF anytime. The workbench will refresh against the newly stored resume.</p>
+                            <div class="section-label"><i class="fa-solid fa-cloud-arrow-up"></i> Replace Resume</div>
+                            <p class="muted-copy">Upload a new PDF at any time. The analysis and fix suggestions will refresh automatically.</p>
                             <input type="file" id="dashboard-resume-input" accept="application/pdf" hidden>
                             <div class="resume-inline-actions">
                                 <button class="btn-outline" id="choose-dashboard-resume-btn">
@@ -428,8 +469,8 @@
                         <article class="resume-heatmap-card glass-card">
                             <div class="resume-panel-head compact-panel-head">
                                 <div>
-                                    <div class="section-label"><i class="fa-solid fa-temperature-half"></i> Section Heatmap</div>
-                                    <h3>Where your resume is strongest and weakest</h3>
+                                    <div class="section-label"><i class="fa-solid fa-temperature-half"></i> Section Scores</div>
+                                    <h3>Which parts of your resume need work</h3>
                                 </div>
                             </div>
                             <div id="resume-section-heatmap" class="section-heatmap">
@@ -440,14 +481,14 @@
                         <article class="resume-next-action-card glass-card">
                             <div class="resume-panel-head compact-panel-head">
                                 <div>
-                                    <div class="section-label"><i class="fa-solid fa-route"></i> Next Best Action</div>
-                                    <h3>Your coach-recommended next move</h3>
+                                    <div class="section-label"><i class="fa-solid fa-route"></i> Next Step</div>
+                                    <h3>What to do after analysis</h3>
                                 </div>
                             </div>
                             <p id="resume-next-action-text" class="next-action-copy">Run analysis and Jobify will guide the next improvement.</p>
                             <div class="resume-inline-actions">
                                 <button class="btn-modern-primary" id="resume-next-action-btn" disabled>
-                                    <i class="fa-solid fa-arrow-right"></i> Do Next Action
+                                    <i class="fa-solid fa-arrow-right"></i> Do This Next
                                 </button>
                             </div>
                         </article>
@@ -458,7 +499,7 @@
                             <div class="resume-panel-head compact-panel-head">
                                 <div>
                                     <div class="section-label"><i class="fa-solid fa-star"></i> Priority Fixes</div>
-                                    <h3>Top improvements to unlock first</h3>
+                                    <h3>Start with these improvements</h3>
                                 </div>
                                 <span id="resume-priority-count" class="status-badge">0 queued</span>
                             </div>
@@ -476,7 +517,7 @@
                                 <div class="resume-panel-head compact-panel-head">
                                     <div>
                                         <div class="section-label"><i class="fa-solid fa-box-open"></i> Fix Packs</div>
-                                        <h3>Apply related improvements together</h3>
+                                        <h3>Grouped fixes by theme</h3>
                                     </div>
                                 </div>
                                 <div id="resume-fix-packs" class="fix-pack-stack">
@@ -487,8 +528,8 @@
                             <article class="resume-progress-card glass-card">
                                 <div class="resume-panel-head compact-panel-head">
                                     <div>
-                                        <div class="section-label"><i class="fa-solid fa-list-check"></i> Fix Progress</div>
-                                        <h3>How far you have improved this draft</h3>
+                                        <div class="section-label"><i class="fa-solid fa-list-check"></i> Progress</div>
+                                        <h3>How much you have improved</h3>
                                     </div>
                                     <span id="resume-score-delta" class="score-delta-badge">+0</span>
                                 </div>
@@ -508,8 +549,8 @@
                             <article class="resume-compare-card glass-card">
                                 <div class="resume-panel-head compact-panel-head">
                                     <div>
-                                        <div class="section-label"><i class="fa-solid fa-code-compare"></i> Compare Drafts</div>
-                                        <h3>Switch between your original and improved resume</h3>
+                                        <div class="section-label"><i class="fa-solid fa-code-compare"></i> Before vs After</div>
+                                        <h3>Compare your original and current draft</h3>
                                     </div>
                                 </div>
                                 <div class="segmented-toggle" id="resume-compare-toggle">
@@ -536,8 +577,8 @@
                     <section class="resume-editor-card glass-card hidden" id="resume-editor-panel">
                         <div class="resume-editor-head">
                             <div>
-                                <div class="section-label"><i class="fa-solid fa-pen-ruler"></i> Fix Mode</div>
-                                <h3>Edit your working resume</h3>
+                                <div class="section-label"><i class="fa-solid fa-pen-ruler"></i> Edit Mode</div>
+                                <h3>Edit your current draft</h3>
                             </div>
                             <div class="resume-inline-actions">
                                 <button class="btn-outline" id="cancel-fix-mode-btn">
@@ -604,8 +645,8 @@
 
             <div id="pane-tracker" class="pane hidden fade-in">
                 <div class="pane-hero">
-                    <h2>Application Intelligence</h2>
-                    <p>Access your dynamically modified ATS-friendly resume bullets here when you are ready to apply.</p>
+                    <h2>Application Tracker</h2>
+                    <p>Save jobs you want to apply to and review the tailored bullet points created for each one.</p>
                 </div>
                 <div id="tracker-container" class="stack-layout"></div>
             </div><!-- /tracker pane -->
@@ -629,6 +670,18 @@
                             <label>Difficulty &mdash; <span id="diff-label">5</span>/10</label>
                             <input type="range" id="interview-diff" min="1" max="10" value="5" class="diff-slider">
                         </div>
+                        <div class="sidebar-field">
+                            <label>Interviewer</label>
+                            <select id="interview-persona">
+                                <option value="strict">Strict</option>
+                                <option value="technical">Technical</option>
+                                <option value="friendly">Friendly</option>
+                                <option value="balanced">Balanced</option>
+                            </select>
+                        </div>
+                        <div class="sidebar-interview-note">
+                            Fullscreen starts automatically. Expect follow-ups, interruptions, and pressure when your answer stays vague.
+                        </div>
                         <button id="start-interview-btn" class="btn-modern-primary w-full">
                             <i class="fa-solid fa-play"></i> Start Interview
                         </button>
@@ -643,20 +696,37 @@
                 <div class="chat-main" id="chat-main">
                     <div id="chat-empty-state" class="chat-empty-state">
                         <div class="chat-empty-icon"><i class="fa-solid fa-microphone-lines"></i></div>
-                        <h3>Ready to practise?</h3>
-                        <p>Set a role and difficulty on the left, then hit <strong>Start Interview</strong>.</p>
+                        <h3>Ready for a real round?</h3>
+                        <p>Choose a role and style, then answer questions one by one. Jobify will keep the session context for you.</p>
                     </div>
                     <div id="studio-active" class="chat-body hidden">
                         <div class="chat-header-bar">
-                            <div>
-                                <span id="chat-role-label" class="chat-role-label"></span>
-                                <span id="chat-diff-badge" class="chat-diff-badge"></span>
+                            <div class="chat-header-main">
+                                <div class="chat-header-copy">
+                                    <span id="chat-role-label" class="chat-role-label"></span>
+                                    <div class="chat-stage-pills">
+                                        <span id="chat-diff-badge" class="chat-diff-badge"></span>
+                                        <span id="chat-persona-badge" class="chat-stage-pill">Balanced</span>
+                                        <span id="chat-pressure-badge" class="chat-stage-pill">Pressure: medium</span>
+                                        <span id="chat-focus-badge" class="chat-stage-pill">Focus: opening</span>
+                                    </div>
+                                </div>
+                                <div class="chat-header-actions">
+                                    <span id="chat-turn-counter" class="chat-turn-counter">Turn 0</span>
+                                    <span id="chat-score-display" class="chat-score"></span>
+                                    <button id="chat-fullscreen-btn" class="btn-outline chat-fullscreen-btn" type="button">
+                                        <i class="fa-solid fa-expand"></i> Fullscreen
+                                    </button>
+                                </div>
                             </div>
-                            <span id="chat-score-display" class="chat-score"></span>
                         </div>
+                        <div id="chat-live-note" class="chat-live-note">Live panel ready. Expect detailed follow-ups and evidence-based pressure.</div>
                         <div class="chat-messages" id="interview-chat"></div>
                         <div class="chat-input-bar">
-                            <textarea id="interview-answer-input" placeholder="Type your answer..." rows="1"></textarea>
+                            <div class="chat-input-stack">
+                                <textarea id="interview-answer-input" placeholder="Answer in 5-10 lines. Use specifics, tradeoffs, and outcomes." rows="1"></textarea>
+                                <div id="chat-answer-hint" class="chat-answer-hint">Answer target: 5-10 lines with context, decision-making, and measurable impact.</div>
+                            </div>
                             <button id="submit-answer-btn" class="send-btn" title="Send Answer">
                                 <i class="fa-solid fa-paper-plane"></i>
                             </button>
@@ -668,6 +738,6 @@
         </section><!-- /content-area -->
     </main>
 
-    <script src="script.js?v=18"></script>
+    <script src="script.js?v=22"></script>
 </body>
 </html>

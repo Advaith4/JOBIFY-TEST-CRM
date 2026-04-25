@@ -1,4 +1,4 @@
-from src.resume_lab import apply_fix, parse_resume, validate_resume_analysis
+from src.resume_lab import apply_fix, parse_resume, repair_resume_text_spacing, validate_resume_analysis
 
 
 def test_parse_resume_extracts_core_sections():
@@ -18,6 +18,76 @@ Experience
     assert "Flutter" in parsed["skills"]
     assert parsed["projects"] == ["Worked on chatbot project"]
     assert parsed["experience"] == ["Responsible for app UI"]
+
+
+def test_repair_resume_text_spacing_unstucks_common_pdf_word_runs():
+    broken = "Third-yearComputerScienceEngineeringstudentwithstrongfoundationsinprogramming,datastructures,andsoftwaredevelopment."
+
+    repaired = repair_resume_text_spacing(broken)
+
+    assert "Third-year Computer Science Engineering student" in repaired
+    assert "strong foundations in programming" in repaired
+    assert "data structures" in repaired
+    assert "software development" in repaired
+
+
+def test_parse_resume_repairs_glued_summary_words():
+    text = """
+Summary
+Third-yearComputerScienceEngineeringstudentwithstrongfoundationsinprogramming,datastructures,andsoftwaredevelopment.
+Skills
+Python, FastAPI, SQL
+"""
+
+    parsed = parse_resume(text)
+
+    assert "Computer Science Engineering student" in parsed["summary"]
+    assert "data structures" in parsed["summary"]
+
+
+def test_repair_resume_text_spacing_handles_multi_sentence_resume_summary():
+    broken = (
+        "Third-yearComputerScienceEngineeringstudentwithstrongfoundationsinprogramming,datastructures,"
+        "andsoftwaredevelopment.Skilledinbuildingefficient,maintainableapplicationswithafocusoncleancode"
+        "andproblem-solving.PossessesworkingknowledgeofGenerativeAI,largelanguagemodels,andmulti-agentsystems,"
+        "withtheabilitytointegrateintelligentfunctionalities"
+    )
+
+    repaired = repair_resume_text_spacing(broken)
+
+    assert "Skilled in building efficient, maintainable applications" in repaired
+    assert "clean code and problem-solving" in repaired
+    assert "Generative AI, large language models, and multi-agent systems" in repaired
+    assert "with the ability to integrate intelligent functionalities" in repaired
+
+
+def test_repair_resume_text_spacing_collapses_character_spaced_pdf_text():
+    broken = (
+        "T h i r d - y e a r C o m p u t e r S c i e n c e E n g i n e e r i n g "
+        "s t u d e n t w i t h s t r o n g f o u n d a t i o n s i n p r o g r a m m i n g , "
+        "d a t a s t r u c t u r e s , a n d s o f t w a r e d e v e l o p m e n t ."
+    )
+
+    repaired = repair_resume_text_spacing(broken)
+
+    assert "Third-year Computer Science Engineering student" in repaired
+    assert "strong foundations in programming" in repaired
+    assert "data structures" in repaired
+    assert "software development" in repaired
+
+
+def test_parse_resume_repairs_character_spaced_section_content():
+    text = """
+S U M M A R Y
+T h i r d - y e a r C o m p u t e r S c i e n c e E n g i n e e r i n g s t u d e n t w i t h s t r o n g f o u n d a t i o n s i n p r o g r a m m i n g .
+S K I L L S
+P y t h o n , F a s t A P I , S Q L
+"""
+
+    parsed = parse_resume(text)
+
+    assert "Computer Science Engineering student" in parsed["summary"]
+    assert parsed["skills"] == ["Python", "FastAPI", "SQL"]
 
 
 def test_invalid_analysis_falls_back_to_grounded_issue():
